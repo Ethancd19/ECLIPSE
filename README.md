@@ -111,9 +111,10 @@ chmod +x setup.sh
 
 This handles everything automatically:
 
-- Ubuntu packages for Pico and STM32 workflows (`cmake`, `gcc-arm-none-eabi`, `openocd`, `build-essential`, `libusb`, etc.)
+- Ubuntu packages for ORBIT's ARM board workflows (`cmake`, `gcc-arm-none-eabi`, `openocd`, `build-essential`, `libusb`, etc.)
 - Pico SDK clone and submodule init at `~/pico-sdk` with `PICO_SDK_PATH` added to `~/.bashrc`
 - STM32CubeF4 clone and submodule init at `~/stm32cubeF4` with `STM32CUBE_F4_PATH` added to `~/.bashrc`
+- Records `NRF5_SDK_PATH` in `~/.bashrc` and checks for Nordic host tools if you already installed them
 - picotool build/install to `~/.local`, plus udev rules
 - Python virtual environment at `.venv/` with all dependencies installed
 - Passwordless sudo rule for `mount`/`umount` at `/etc/sudoers.d/orbit`
@@ -123,6 +124,12 @@ The build system looks for STM32CubeF4 at `~/stm32cubeF4` by default. Override w
 
 ```bash
 export STM32CUBE_F4_PATH=/path/to/STM32CubeF4
+```
+
+The nRF52 build looks for the Nordic nRF5 SDK at `~/nRF5_SDK` by default. Override with:
+
+```bash
+export NRF5_SDK_PATH=/path/to/nRF5_SDK
 ```
 
 ---
@@ -155,6 +162,7 @@ This verifies the toolchain and board-specific prerequisites used by ORBIT:
 - `cmake`, `arm-none-eabi-gcc`, and Python
 - `PICO_SDK_PATH`, `picotool`, `/mnt/pico`, and `attach_pico.ps1`
 - `STM32CUBE_F4_PATH` and `openocd`
+- `NRF5_SDK_PATH` and `nrfjprog`
 - Visible USB serial devices such as `/dev/ttyACM0`
 
 ---
@@ -185,7 +193,7 @@ python3 tools/orbit.py --board stm32 --algo ascon_aead128 --runs 1 --clean
 | -------- | ---------------- | --------------------------------------------------------------- |
 | Pico     | Pico SDK         | Handled by `setup.sh`                                           |
 | STM32    | STM32CubeF4      | Handled by `setup.sh`; override with `STM32CUBE_F4_PATH` if needed |
-| nRF52832 | nRF5 SDK         | Set `NRF5_SDK_PATH`: in progress                                |
+| nRF52832 | nRF5 SDK + Nordic CLI tools | Install the nRF5 SDK, `nrfjprog`, and Segger J-Link tools; set `NRF5_SDK_PATH` |
 | ESP32-C6 | ESP-IDF v5.x     | Separate build system: in progress                              |
 | RPi5     | Native Linux toolchain | `sudo apt install build-essential cmake python3 python3-venv` |
 
@@ -299,6 +307,33 @@ If more than one USB serial device is visible in WSL2, pass the board port expli
 python3 tools/orbit.py --board stm32 --algo ascon_aead128 --runs 5 --flash --port /dev/ttyACM0
 ```
 
+### Per-run workflow (nRF52 + WSL2)
+
+The PCA10040 is flashed via `nrfjprog` and benchmark output is captured from the board's J-Link virtual COM port.
+
+Before running:
+
+1. Install the Nordic nRF5 SDK
+2. Install Nordic Command Line Tools so `nrfjprog` is on `PATH`
+3. Install Segger J-Link tools
+4. Export `NRF5_SDK_PATH`
+5. Attach the board to WSL2 if needed
+
+For a full automated run, use:
+
+```bash
+python3 tools/orbit.py --board nrf52 --algo ascon_aead128 --runs 5 --flash --port /dev/ttyACM0
+```
+
+If two ACM ports appear, the validated capture port for the PCA10040 workflow is typically `/dev/ttyACM0`.
+
+ORBIT handles:
+
+- building the firmware
+- flashing with `nrfjprog`
+- opening the serial port before reset
+- resetting the board again so the full benchmark output is captured from the top
+
 ### Manual flash mode
 
 If you omit `--flash`, ORBIT still builds and captures results, but it waits for you to flash or reset the board yourself between runs.
@@ -307,9 +342,10 @@ If you omit `--flash`, ORBIT still builds and captures results, but it waits for
 
 The Raspberry Pi 5 does not use USB flashing or serial capture. Instead:
 
-1. Clone ORBIT directly onto the Pi
-2. Run `./setup.sh` or install the native Linux prerequisites manually
-3. Build and execute the benchmark locally with `python3 tools/orbit.py --board rpi5 --algo <algorithm> --runs 5`
+1. SSH into the Raspberry Pi 5
+2. Clone ORBIT directly onto the Pi
+3. Install the native Linux prerequisites on the Pi, or run `./setup.sh`
+4. Build and execute the benchmark locally on the Pi with `python3 tools/orbit.py --board rpi5 --algo <algorithm> --runs 5`
 
 `--flash` is ignored for `rpi5` because there is no device flashing step.
 
@@ -426,7 +462,7 @@ Preliminary single-run data (collected before 5-run protocol): `results/archived
 | ------------------- | ------------------------------ | ---------- |
 | RP2040 (Pico)       | SysTick + time_us_64()         | 1 cycle    |
 | STM32F446 (Nucleo)  | DWT CYCCNT                     | 1 cycle    |
-| nRF52832 (PCA10040) | DWT CYCCNT                     | 1 cycle    |
+| nRF52832 (PCA10040) | TIMER1 capture scaled to 64 MHz-equivalent ticks | ~4 CPU cycles |
 | ESP32-C6            | RISC-V CSR `cycle`             | 1 cycle    |
 | BCM2712 (RPi5)      | ARM generic timer (`cntvct_el0`) with `clock_gettime` fallback | ~1 tick |
 

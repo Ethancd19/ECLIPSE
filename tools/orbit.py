@@ -34,7 +34,7 @@ BOARDS = {
         "baud": 115200,
     },
     "nrf52": {
-        "name": "Nordic nRF52840",
+        "name": "Nordic nRF52832 (PCA10040)",
         "arch": "armv7e-m",
         "flash_method": "nrfjprog",
         "baud": 115200,
@@ -97,7 +97,7 @@ def is_wsl():
 FLASH_FUNCS = {
     "pico": lambda binary: flash_pico(binary),
     "stm32": lambda binary: flash_stm32(binary),
-    # "nrf52":   lambda binary: flash_nrf52(binary),
+    "nrf52": lambda binary: flash_nrf52(binary),
     # "esp32c6": lambda binary: flash_esp32c6(binary),
     # "rpi5":    lambda binary: flash_rpi5(binary),
 }
@@ -215,6 +215,12 @@ def resolve_pico_sdk_path():
     return os.environ.get("PICO_SDK_PATH")
 
 
+def resolve_nrf5_sdk_path():
+    return os.environ.get("NRF5_SDK_PATH") or os.path.join(
+        os.path.expanduser("~"), "nRF5_SDK"
+    )
+
+
 def check_item(label, ok, detail, failures, required=True):
     status = "OK" if ok else "MISSING"
     print(f"[{status:<7}] {label}: {detail}")
@@ -256,7 +262,7 @@ def run_prereq_check(board=None):
     port_detail = ", ".join(ports) if ports else "no ttyACM/ttyUSB devices visible right now"
     check_item("Serial devices", True, port_detail, failures, required=False)
 
-    boards_to_check = [board] if board else ["pico", "stm32", "rpi5"]
+    boards_to_check = [board] if board else ["pico", "stm32", "nrf52", "rpi5"]
 
     if "pico" in boards_to_check:
         print("\n== Pico ==")
@@ -338,6 +344,25 @@ def run_prereq_check(board=None):
         )
         check_item("OpenOCD config", True, openocd_cfg, failures, required=False)
 
+    if "nrf52" in boards_to_check:
+        print("\n== nRF52 ==")
+        nrf5_sdk_path = resolve_nrf5_sdk_path()
+        nrf5_sdk_ok = os.path.exists(
+            os.path.join(nrf5_sdk_path, "modules", "nrfx", "mdk", "nrf.h")
+        )
+        check_item(
+            "NRF5_SDK_PATH",
+            nrf5_sdk_ok,
+            nrf5_sdk_path,
+            failures,
+        )
+
+        if command_exists("nrfjprog"):
+            ok, detail = check_version_command(["nrfjprog", "--version"])
+            check_item("nrfjprog", ok, detail, failures)
+        else:
+            check_item("nrfjprog", False, "not found on PATH", failures)
+
     if "rpi5" in boards_to_check:
         print("\n== RPi5 ==")
         for label, command in (
@@ -372,6 +397,12 @@ def find_build_artifact(board, algo):
             os.path.join(BUILD_DIR, f"{target_name}.bin"),
             os.path.join(BUILD_DIR, target_name),
         ])
+    elif board == "nrf52":
+        candidates.extend([
+            os.path.join(BUILD_DIR, f"{target_name}.hex"),
+            os.path.join(BUILD_DIR, f"{target_name}.bin"),
+            os.path.join(BUILD_DIR, target_name),
+        ])
     elif board == "rpi5":
         candidates.extend([
             os.path.join(BUILD_DIR, target_name),
@@ -387,6 +418,53 @@ def find_build_artifact(board, algo):
         if os.path.exists(path):
             return path
     return None
+
+
+def resolve_size_input(board, algo, artifact):
+    target_name = f"ORBIT_{algo}_{board}"
+    candidates = [
+        os.path.join(BUILD_DIR, target_name),
+        artifact,
+    ]
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def extract_memory_metrics(board, algo, artifact):
+    metrics = {"flash_bytes": 0, "ram_bytes": 0}
+    size_input = resolve_size_input(board, algo, artifact)
+    if size_input is None:
+        return metrics
+
+    size_tool = "arm-none-eabi-size" if board in {"pico", "stm32", "nrf52"} else "size"
+    if not command_exists(size_tool):
+        return metrics
+
+    result = run_capture([size_tool, size_input])
+    if result.returncode != 0:
+        return metrics
+
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return metrics
+
+    parts = lines[1].split()
+    if len(parts) < 4:
+        return metrics
+
+    try:
+        text = int(parts[0])
+        data = int(parts[1])
+        bss = int(parts[2])
+    except ValueError:
+        return metrics
+
+    metrics["flash_bytes"] = text + data
+    metrics["ram_bytes"] = data + bss
+    return metrics
 
 
 def _cache_value(cache_path, key):
@@ -438,7 +516,7 @@ def build(board, algo, clean=False):
 
     log(f"Configuring for {board} with algorithm {algo}...")
     extra_cmake_args = ""
-    if board == "stm32":
+    if board in {"stm32", "nrf52"}:
         extra_cmake_args = (
             " -DCMAKE_C_COMPILER=arm-none-eabi-gcc"
             " -DCMAKE_CXX_COMPILER=arm-none-eabi-g++"
@@ -605,6 +683,17 @@ def flash_stm32(binary_path):
     log("Flashing STM32 via OpenOCD...")
     run_command(flash_cmd)
     time.sleep(2)
+
+
+def flash_nrf52(binary_path):
+    if binary_path.endswith(".hex"):
+        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --verify -f nrf52 && nrfjprog --reset -f nrf52'
+    else:
+        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --sectorerase --verify -f nrf52 && nrfjprog --reset -f nrf52'
+
+    log("Flashing nRF52 via nrfjprog...")
+    run_command(flash_cmd)
+    time.sleep(1)
 # ----- Serial Capture and Result Processing -----
 
 def find_serial_port(baud=115200, timeout=30):
@@ -627,6 +716,54 @@ def capture_serial(port, baud=115200, timeout=300):
 
     try:
         with serial.Serial(port, baudrate=baud, timeout=1) as ser:
+            start = time.time()
+            while time.time() - start < timeout:
+                chunk = ser.read(ser.in_waiting or 1)
+                if not chunk:
+                    continue
+
+                text = chunk.decode("utf-8", errors="replace")
+                pending += text
+
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    line = line.rstrip("\r")
+                    if not line:
+                        continue
+                    print(f"    {line}")
+                    lines.append(line)
+                    if "ORBIT benchmark completed" in line:
+                        log("Benchmark complete signal received")
+                        return lines
+
+            if pending.strip():
+                line = pending.rstrip("\r")
+                print(f"    {line}")
+                lines.append(line)
+    except serial.SerialException as e:
+        log(f"Error reading serial port: {e}")
+        sys.exit(1)
+    return lines
+
+
+def capture_serial_after_reset(port, baud=115200, timeout=300, reset_cmd=None, settle_ms=200):
+    log(f"Opening {port} at {baud} baud before reset...")
+    lines = []
+    pending = ""
+
+    try:
+        with serial.Serial(port, baudrate=baud, timeout=1) as ser:
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+
+            if reset_cmd:
+                time.sleep(settle_ms / 1000.0)
+                log(f"Issuing reset while serial port is open: {reset_cmd}")
+                ret = subprocess.call(reset_cmd, shell=True)
+                if ret != 0:
+                    log(f"Reset command failed with exit code {ret}")
+                    sys.exit(1)
+
             start = time.time()
             while time.time() - start < timeout:
                 chunk = ser.read(ser.in_waiting or 1)
@@ -701,15 +838,22 @@ def capture_local_process(binary_path, timeout=300):
 
     return lines
 
-def save_results(lines, output_path, run_index, total_runs, board, algo):
+def save_results(lines, output_path, run_index, total_runs, board, algo, memory_metrics=None):
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
     header = None
-    data_rows = []
     for line in lines:
         if line.startswith("timestamp_iso"):
             header = line
-        elif line.startswith("1970") or (line[:4].isdigit() and line[4] == "-"):
+            break
+
+    header_to_write = header or DEFAULT_CSV_HEADER
+    fieldnames = next(csv.reader([header_to_write]))
+    field_index = {name: idx for idx, name in enumerate(fieldnames)}
+
+    data_rows = []
+    for line in lines:
+        if line.startswith("1970") or (line[:4].isdigit() and line[4] == "-"):
             ts_now = host_timestamp_iso()
             try:
                 parsed = next(csv.reader([line]))
@@ -721,6 +865,13 @@ def save_results(lines, output_path, run_index, total_runs, board, algo):
             
             parsed[0] = ts_now
             parsed[1] = make_run_id(ts_now, algo, board, parsed[6] if len(parsed) > 6 else "unknown")
+            if memory_metrics:
+                flash_idx = field_index.get("flash_bytes")
+                ram_idx = field_index.get("ram_bytes")
+                if flash_idx is not None and flash_idx < len(parsed):
+                    parsed[flash_idx] = str(memory_metrics.get("flash_bytes", 0))
+                if ram_idx is not None and ram_idx < len(parsed):
+                    parsed[ram_idx] = str(memory_metrics.get("ram_bytes", 0))
 
             buf = io.StringIO()
             csv.writer(buf).writerow(parsed)
@@ -731,8 +882,6 @@ def save_results(lines, output_path, run_index, total_runs, board, algo):
         return False
     
     write_header = (run_index == 1) and not os.path.exists(output_path)
-    header_to_write = header or DEFAULT_CSV_HEADER
-
     with open(output_path, "a", encoding="utf-8", newline="") as f:
         if write_header:
             f.write(f"run,{header_to_write}\n")
@@ -829,6 +978,7 @@ Examples:
     log(f"Output CSV: {args.output}")
 
     binary = build(args.board, args.algo, clean=args.clean)
+    memory_metrics = extract_memory_metrics(args.board, args.algo, binary)
 
     if args.build_only:
         log("Build-only mode enabled; skipping flashing and serial capture.")
@@ -844,7 +994,7 @@ Examples:
             if args.flash and run == 1:
                 log("RPi5 runs locally; ignoring --flash.")
             lines = capture_local_process(binary, timeout=serial_timeout)
-            save_results(lines, args.output, run, args.runs, args.board, args.algo)
+            save_results(lines, args.output, run, args.runs, args.board, args.algo, memory_metrics=memory_metrics)
             continue
 
         if args.flash:
@@ -855,6 +1005,12 @@ Examples:
                     log("Run 1 will flash STM32 via OpenOCD and then capture serial output.")
                 else:
                     log(f"Run {run}: reflashing STM32 to restart the benchmark...")
+                FLASH_FUNCS[args.board](binary)
+            elif args.board == "nrf52":
+                if run == 1:
+                    log("Run 1 will flash nRF52 via nrfjprog and then capture serial output.")
+                else:
+                    log(f"Run {run}: reflashing nRF52 to restart the benchmark...")
                 FLASH_FUNCS[args.board](binary)
             else:
                 log(f"Auto-flash not yet implemented for {BOARDS[args.board]['name']}")
@@ -880,8 +1036,16 @@ Examples:
             log("ERROR: Could not find serial port - exiting")
             sys.exit(1)
 
-        lines = capture_serial(port, baud=BOARDS[args.board]["baud"], timeout=serial_timeout)
-        save_results(lines, args.output, run, args.runs, args.board, args.algo)
+        if args.board == "nrf52":
+            lines = capture_serial_after_reset(
+                port,
+                baud=BOARDS[args.board]["baud"],
+                timeout=serial_timeout,
+                reset_cmd="nrfjprog --reset -f nrf52",
+            )
+        else:
+            lines = capture_serial(port, baud=BOARDS[args.board]["baud"], timeout=serial_timeout)
+        save_results(lines, args.output, run, args.runs, args.board, args.algo, memory_metrics=memory_metrics)
     
     log(f"\nAll {args.runs} runs complete:")
     log(f"Results saved to: {args.output}")

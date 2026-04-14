@@ -180,7 +180,7 @@ static const char *csv_escape(const char *str) {
     return str ? str : "";
 }
 
-#ifdef STM32F446xx
+#if defined(STM32F446xx) || defined(NRF52832_XXAA)
 static void put_u64(uint64_t value) {
     char buf[21];
     int i = 0;
@@ -258,7 +258,7 @@ static void put_csv_str(const char *str, int quote) {
 #endif
 
 void print_csv_row(const csv_row_t *row) {
-#ifdef STM32F446xx
+#if defined(STM32F446xx) || defined(NRF52832_XXAA)
     put_csv_str(row->timestamp_iso, 0); platform_puts(",");
     put_csv_str(row->run_id, 0); platform_puts(",");
     put_csv_str(row->algorithm, 0); platform_puts(",");

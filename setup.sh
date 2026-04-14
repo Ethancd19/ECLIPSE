@@ -5,6 +5,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PICO_SDK_PATH_DEFAULT="${PICO_SDK_PATH:-$HOME/pico-sdk}"
 STM32CUBE_F4_PATH_DEFAULT="${STM32CUBE_F4_PATH:-$HOME/stm32cubeF4}"
+NRF5_SDK_PATH_DEFAULT="${NRF5_SDK_PATH:-$HOME/nRF5_SDK}"
 PICO_TOOL_PREFIX="${HOME}/.local"
 SUDOERS_FILE="/etc/sudoers.d/orbit"
 PICOTOOL_REPO_URL="https://github.com/raspberrypi/picotool.git"
@@ -51,7 +52,7 @@ install_apt_dependencies() {
   ensure_command sudo
   ensure_command apt-get
 
-  info "Installing Ubuntu packages needed for Pico and STM32 workflows..."
+  info "Installing Ubuntu packages needed for ORBIT's ARM board workflows..."
   sudo apt-get update
   sudo apt-get install -y "${APT_PACKAGES[@]}"
 }
@@ -80,6 +81,31 @@ setup_stm32cube() {
   info "Initializing STM32CubeF4 submodules..."
   git -C "${STM32CUBE_F4_PATH_DEFAULT}" submodule update --init --recursive
   export STM32CUBE_F4_PATH="${STM32CUBE_F4_PATH_DEFAULT}"
+}
+
+setup_nrf5_sdk() {
+  if [[ -d "${NRF5_SDK_PATH_DEFAULT}" ]]; then
+    info "nRF5 SDK already exists at ${NRF5_SDK_PATH_DEFAULT}; leaving it in place."
+  else
+    info "nRF5 SDK not found at ${NRF5_SDK_PATH_DEFAULT}."
+    info "Place the Nordic nRF5 SDK there, or export NRF5_SDK_PATH to your SDK location."
+  fi
+
+  export NRF5_SDK_PATH="${NRF5_SDK_PATH_DEFAULT}"
+}
+
+check_nordic_host_tools() {
+  if command -v nrfjprog >/dev/null 2>&1; then
+    info "Found nrfjprog on PATH."
+  else
+    info "nrfjprog not found on PATH; install Nordic Command Line Tools for nRF52 flashing."
+  fi
+
+  if command -v JLinkExe >/dev/null 2>&1 || command -v JLinkGDBServer >/dev/null 2>&1; then
+    info "Found Segger J-Link tooling on PATH."
+  else
+    info "Segger J-Link tools not found on PATH; install them if your Nordic workflow needs them."
+  fi
 }
 
 setup_picotool_source() {
@@ -158,6 +184,7 @@ update_shell_profile() {
   append_line_if_missing 'export PATH="$HOME/.local/bin:$PATH"' "${shell_rc}"
   append_line_if_missing "export PICO_SDK_PATH=\"${PICO_SDK_PATH_DEFAULT}\"" "${shell_rc}"
   append_line_if_missing "export STM32CUBE_F4_PATH=\"${STM32CUBE_F4_PATH_DEFAULT}\"" "${shell_rc}"
+  append_line_if_missing "export NRF5_SDK_PATH=\"${NRF5_SDK_PATH_DEFAULT}\"" "${shell_rc}"
   append_line_if_missing 'export picotool_DIR="$HOME/.local/picotool"' "${shell_rc}"
 }
 
@@ -172,6 +199,7 @@ Next steps:
   3. Verify host prerequisites: python3 tools/orbit.py --check
   4. Run a benchmark, for example:
      python3 tools/orbit.py --board pico --algo ascon_aead128 --runs 5 --flash
+  5. For nRF52, make sure NRF5_SDK_PATH points at your nRF5 SDK and that nrfjprog is on PATH
 
 EOF
 }
@@ -183,6 +211,8 @@ main() {
   install_apt_dependencies
   setup_pico_sdk
   setup_stm32cube
+  setup_nrf5_sdk
+  check_nordic_host_tools
   install_picotool
   install_picotool_udev_rules
   setup_python_env

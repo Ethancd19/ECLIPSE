@@ -29,10 +29,17 @@
 #ifndef TARGET_ARCH
 #define TARGET_ARCH "unknown-arch"
 #endif
+#ifndef PLATFORM_BOOT_DELAY_MS
+#define PLATFORM_BOOT_DELAY_MS 2000
+#endif
 
+#ifndef ORBIT_MAX_MSG_LEN
+#define ORBIT_MAX_MSG_LEN    16384
+#endif
+
+#if ORBIT_MAX_MSG_LEN >= 16384
 #define NUM_MSG_SIZES        6
 static const size_t MSG_SIZES[NUM_MSG_SIZES] = {16, 64, 256, 1024, 4096, 16384};
-
 #ifdef SLOW_ALGO
 static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {50, 20, 10, 5, 3, 2};
 static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {10, 10,  5, 3, 2, 1};
@@ -40,8 +47,31 @@ static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {10, 10,  5, 3, 2, 1};
 static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {1000, 1000, 1000, 500, 200, 100};
 static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {1000, 1000, 1000, 500, 200, 100};
 #endif
+#elif ORBIT_MAX_MSG_LEN >= 4096
+#define NUM_MSG_SIZES        5
+static const size_t MSG_SIZES[NUM_MSG_SIZES] = {16, 64, 256, 1024, 4096};
+#ifdef SLOW_ALGO
+static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {50, 20, 10, 5, 3};
+static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {10, 10,  5, 3, 2};
+#else
+static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {1000, 1000, 1000, 500, 200};
+static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {1000, 1000, 1000, 500, 200};
+#endif
+#elif ORBIT_MAX_MSG_LEN >= 1024
+#define NUM_MSG_SIZES        4
+static const size_t MSG_SIZES[NUM_MSG_SIZES] = {16, 64, 256, 1024};
+#ifdef SLOW_ALGO
+static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {50, 20, 10, 5};
+static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {10, 10,  5, 3};
+#else
+static const uint32_t BENCH_ITERS[NUM_MSG_SIZES]  = {1000, 1000, 1000, 500};
+static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {1000, 1000, 1000, 500};
+#endif
+#else
+#error "ORBIT_MAX_MSG_LEN must be at least 1024 bytes"
+#endif
 
-#define MAX_MSG_LEN          16384
+#define MAX_MSG_LEN          ORBIT_MAX_MSG_LEN
 #define MAX_CT_LEN           (MAX_MSG_LEN + 64)
 #define BENCH_AD_LEN         32
 
@@ -52,7 +82,7 @@ static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {1000, 1000, 1000, 500, 200,
 #include "api.h"
 
 static uint8_t g_m[MAX_MSG_LEN];
-static uint8_t g_ad[MAX_MSG_LEN];
+static uint8_t g_ad[BENCH_AD_LEN];
 static uint8_t g_c[MAX_CT_LEN];
 static uint8_t g_m_dec[MAX_MSG_LEN];
 
@@ -94,6 +124,7 @@ static int correctness_and_tamper(size_t mlen, size_t adlen) {
 }
 
 static void bench_one(size_t mlen, size_t adlen, uint32_t iterations, csv_row_t *row) {
+    uint32_t warmup_iters = 0;
     uint8_t *m = g_m;
     uint8_t *ad = g_ad;
     uint8_t *c = g_c;
@@ -110,11 +141,17 @@ static void bench_one(size_t mlen, size_t adlen, uint32_t iterations, csv_row_t 
     fill_deterministic(ad, adlen, 0x5A5A5A5A);
     fill_deterministic(m, mlen, 0xA5A5A5A5);
 
-    (void)crypto_aead_encrypt(c, &clen, m, (unsigned long long)mlen, ad, (unsigned long long)adlen, NULL, nonce, key);
+    for (size_t s = 0; s < NUM_MSG_SIZES; s++) {
+        if (MSG_SIZES[s] == mlen) {
+            warmup_iters = WARMUP_ITERS[s];
+            break;
+        }
+    }
 
-    for (uint32_t i = 0; i < iterations; i++) {
+    for (uint32_t i = 0; i < warmup_iters; i++) {
         fill_deterministic(m, mlen, (uint32_t)(0xA5A5A5A5 + i));
         (void)crypto_aead_encrypt(c, &clen, m, (unsigned long long)mlen, ad, (unsigned long long)adlen, NULL, nonce, key);
+        (void)crypto_aead_decrypt(m_dec, &mlen_dec, NULL, c, clen, ad, (unsigned long long)adlen, nonce, key);
     }
 
     // Benchmark encryption
@@ -244,7 +281,7 @@ int main(void) {
     while (!platform_stdio_ready()) {
         platform_delay_ms(100);
     }
-    platform_delay_ms(2000);
+    platform_delay_ms(PLATFORM_BOOT_DELAY_MS);
 
     print_csv_header();
 #ifdef IS_KEM
