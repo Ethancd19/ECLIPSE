@@ -7,6 +7,8 @@
 
 #define TRIGGER_PIN_PORT    GPIOA
 #define TRIGGER_PIN         GPIO_PIN_8
+#define FRAME_TRIGGER_PIN_PORT GPIOA
+#define FRAME_TRIGGER_PIN      GPIO_PIN_9
 
 extern UART_HandleTypeDef huart2;
 
@@ -99,13 +101,14 @@ static inline void platform_init(void) {
     huart2.Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(&huart2);
 
-    gpio.Pin       = TRIGGER_PIN;
+    gpio.Pin       = TRIGGER_PIN | FRAME_TRIGGER_PIN;
     gpio.Mode      = GPIO_MODE_OUTPUT_PP;
     gpio.Pull      = GPIO_NOPULL;
     gpio.Speed     = GPIO_SPEED_FREQ_HIGH;
     gpio.Alternate = 0;
     HAL_GPIO_Init(TRIGGER_PIN_PORT, &gpio);
     HAL_GPIO_WritePin(TRIGGER_PIN_PORT, TRIGGER_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(FRAME_TRIGGER_PIN_PORT, FRAME_TRIGGER_PIN, GPIO_PIN_RESET);
 
     _dwt_init();
 }
@@ -120,6 +123,14 @@ static inline void platform_trigger_high(void) {
 
 static inline void platform_trigger_low(void) {
     HAL_GPIO_WritePin(TRIGGER_PIN_PORT, TRIGGER_PIN, GPIO_PIN_RESET);
+}
+
+static inline void platform_frame_trigger_high(void) {
+    HAL_GPIO_WritePin(FRAME_TRIGGER_PIN_PORT, FRAME_TRIGGER_PIN, GPIO_PIN_SET);
+}
+
+static inline void platform_frame_trigger_low(void) {
+    HAL_GPIO_WritePin(FRAME_TRIGGER_PIN_PORT, FRAME_TRIGGER_PIN, GPIO_PIN_RESET);
 }
 
 static inline uint32_t platform_freq_hz(void) {

@@ -50,6 +50,14 @@ static inline void platform_trigger_low(void) {
     /* Optional GPIO trigger support can be added later via libgpiod. */
 }
 
+static inline void platform_frame_trigger_high(void) {
+    /* Optional GPIO trigger support can be added later via libgpiod. */
+}
+
+static inline void platform_frame_trigger_low(void) {
+    /* Optional GPIO trigger support can be added later via libgpiod. */
+}
+
 static inline uint32_t platform_freq_hz(void) {
 #if defined(__aarch64__)
     return (uint32_t)_rpi5_cntfrq_el0();

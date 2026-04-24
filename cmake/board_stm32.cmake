@@ -125,6 +125,14 @@ if(ALGO_SELECTED STREQUAL "ml_kem_512")
     target_compile_definitions(${TARGET_NAME} PRIVATE IS_KEM=1 SLOW_ALGO=1)
 endif()
 
+if(DEFINED ORBIT_ENERGY_RUNS)
+    target_compile_definitions(${TARGET_NAME} PRIVATE ORBIT_ENERGY_RUNS=${ORBIT_ENERGY_RUNS})
+endif()
+
+if(ORBIT_NO_STDIO_WAIT)
+    target_compile_definitions(${TARGET_NAME} PRIVATE ORBIT_NO_STDIO_WAIT=1)
+endif()
+
 target_compile_options(${TARGET_NAME} PRIVATE 
     -O2 
     -Wall 

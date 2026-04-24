@@ -13,6 +13,7 @@
 #define UART_TX_PIN 6u
 #define UART_RX_PIN 8u
 #define TRIGGER_PIN 13u
+#define FRAME_TRIGGER_PIN 14u
 #define TIMER_TICK_HZ 16000000UL
 
 static inline void _gpio_cfg_output(uint32_t pin) {
@@ -78,6 +79,8 @@ static inline void platform_init(void) {
     _hfclk_init();
     _gpio_cfg_output(TRIGGER_PIN);
     NRF_P0->OUTCLR = (1UL << TRIGGER_PIN);
+    _gpio_cfg_output(FRAME_TRIGGER_PIN);
+    NRF_P0->OUTCLR = (1UL << FRAME_TRIGGER_PIN);
     _gpio_cfg_output(UART_TX_PIN);
     _gpio_cfg_input(UART_RX_PIN);
     _uart_init();
@@ -99,6 +102,14 @@ static inline void platform_trigger_high(void) {
 
 static inline void platform_trigger_low(void) {
     NRF_P0->OUTCLR = (1UL << TRIGGER_PIN);
+}
+
+static inline void platform_frame_trigger_high(void) {
+    NRF_P0->OUTSET = (1UL << FRAME_TRIGGER_PIN);
+}
+
+static inline void platform_frame_trigger_low(void) {
+    NRF_P0->OUTCLR = (1UL << FRAME_TRIGGER_PIN);
 }
 
 static inline uint32_t platform_freq_hz(void) {

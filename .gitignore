@@ -60,6 +60,10 @@ Makefile
 compile_commands.json
 _deps/
 
+# ESP-IDF local generated configuration
+platforms/esp32c61/sdkconfig
+platforms/esp32c61/sdkconfig.old
+
 # -----------------------------------------------------------------------------
 # Pico SDK (fetched at configure time, not committed)
 # -----------------------------------------------------------------------------
@@ -68,9 +72,15 @@ picotool/
 
 # -----------------------------------------------------------------------------
 # Benchmark results
-# Keep results/ and results/archived/ — these are the primary research output.
-# Exclude nothing under results/ so all CSVs are tracked.
+# Keep top-level results CSVs trackable; archive churn is local.
 # -----------------------------------------------------------------------------
+results/archived/*
+!results/archived/README.md
+results/traces/
+results/*_clean_probe.csv
+results/*_connection_probe.csv
+results/*_validation.csv
+results/*.bak
 plots/
 
 # -----------------------------------------------------------------------------
@@ -98,6 +108,7 @@ dist/
 .venv/
 venv/
 env/
+.matplotlib/
 
 # -----------------------------------------------------------------------------
 # OS / editor files

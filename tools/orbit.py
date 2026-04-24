@@ -19,6 +19,7 @@ import time
 import re
 import shutil
 import glob
+import shlex
 from datetime import datetime, timezone
 
 import serial
@@ -45,10 +46,10 @@ BOARDS = {
         "flash_method": "openocd",
         "baud": 115200,
     },
-    "esp32c6": {
-        "name": "ESP32-C6",
+    "esp32c61": {
+        "name": "ESP32-C61",
         "arch": "riscv32",
-        "flash_method": "esptool",
+        "flash_method": "idf.py",
         "baud": 115200,
     },
     "rpi5": {
@@ -72,6 +73,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 ARCHIVE_DIR = os.path.join(RESULTS_DIR, "archived")
+IDF_BOARDS = {
+    "esp32c61": {
+        "idf_target": "esp32c61",
+        "project_dir": os.path.join(PROJECT_ROOT, "platforms", "esp32c61"),
+    },
+}
 
 TIMESTAMP_COL = "timestamp_iso"
 RUN_ID_COL = "run_id"
@@ -98,7 +105,6 @@ FLASH_FUNCS = {
     "pico": lambda binary: flash_pico(binary),
     "stm32": lambda binary: flash_stm32(binary),
     "nrf52": lambda binary: flash_nrf52(binary),
-    # "esp32c6": lambda binary: flash_esp32c6(binary),
     # "rpi5":    lambda binary: flash_rpi5(binary),
 }
 
@@ -147,14 +153,27 @@ def postprocess_csv(input_path: str, output_path: str | None = None) -> None:
     log(f"Post-processing CSV: {input_path}")
     log(f"File timestamp (UTC): {file_ts}")
 
+    expected_fieldnames = ["run"] + next(csv.reader([DEFAULT_CSV_HEADER]))
+
     with open(input_path, newline="", encoding="utf-8") as infile:
-        reader = csv.DictReader(infile)
-        fieldnames = reader.fieldnames
-        if fieldnames is None:
+        raw_rows = list(csv.reader(infile))
+        if not raw_rows:
             log("Error: CSV file has no header")
             sys.exit(1)
 
-        rows = list(reader)
+    header = raw_rows[0]
+    if header != expected_fieldnames:
+        log("Warning: CSV header did not match expected ORBIT schema; repairing header and trimming malformed fields.")
+
+    rows = []
+    for raw in raw_rows[1:]:
+        if len(raw) < len(expected_fieldnames):
+            log(f"Warning: skipping short CSV row with {len(raw)} field(s): {raw[:4]}")
+            continue
+        if len(raw) > len(expected_fieldnames):
+            log(f"Warning: trimming malformed CSV row from {len(raw)} to {len(expected_fieldnames)} fields")
+            raw = raw[:len(expected_fieldnames)]
+        rows.append(dict(zip(expected_fieldnames, raw)))
     
     epoch_pattern = re.compile(r"^1970-")
     fixed = 0
@@ -166,7 +185,7 @@ def postprocess_csv(input_path: str, output_path: str | None = None) -> None:
             fixed += 1
     
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=fieldnames, lineterminator="\n")
+    writer = csv.DictWriter(buf, fieldnames=expected_fieldnames, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
 
@@ -262,7 +281,7 @@ def run_prereq_check(board=None):
     port_detail = ", ".join(ports) if ports else "no ttyACM/ttyUSB devices visible right now"
     check_item("Serial devices", True, port_detail, failures, required=False)
 
-    boards_to_check = [board] if board else ["pico", "stm32", "nrf52", "rpi5"]
+    boards_to_check = [board] if board else ["pico", "stm32", "nrf52", "esp32c61", "rpi5"]
 
     if "pico" in boards_to_check:
         print("\n== Pico ==")
@@ -363,6 +382,36 @@ def run_prereq_check(board=None):
         else:
             check_item("nrfjprog", False, "not found on PATH", failures)
 
+    if "esp32c61" in boards_to_check:
+        print("\n== ESP32-C61 ==")
+        idf_path = os.environ.get("IDF_PATH")
+        idf_project = IDF_BOARDS["esp32c61"]["project_dir"]
+        check_item(
+            "IDF_PATH",
+            bool(idf_path and os.path.isdir(idf_path)),
+            idf_path or "unset; run . ~/esp/esp-idf/export.sh",
+            failures,
+        )
+
+        if command_exists("idf.py"):
+            ok, detail = check_version_command(["idf.py", "--version"])
+            check_item("idf.py", ok, detail, failures)
+        else:
+            check_item("idf.py", False, "not found on PATH; run . ~/esp/esp-idf/export.sh", failures)
+
+        if command_exists("esptool.py"):
+            ok, detail = check_version_command(["esptool.py", "version"])
+            check_item("esptool.py", ok, detail, failures)
+        else:
+            check_item("esptool.py", False, "not found on PATH after ESP-IDF export", failures)
+
+        check_item(
+            "ESP-IDF project",
+            os.path.exists(os.path.join(idf_project, "CMakeLists.txt")),
+            idf_project,
+            failures,
+        )
+
     if "rpi5" in boards_to_check:
         print("\n== RPi5 ==")
         for label, command in (
@@ -387,7 +436,13 @@ def find_build_artifact(board, algo):
     target_name = f"ORBIT_{algo}_{board}"
     candidates = []
 
-    if board == "pico":
+    if board in IDF_BOARDS:
+        idf_build_dir = idf_build_dir_for(board, algo)
+        candidates.extend([
+            os.path.join(idf_build_dir, f"{target_name}.bin"),
+            os.path.join(idf_build_dir, f"{target_name}.elf"),
+        ])
+    elif board == "pico":
         candidates.extend([
             os.path.join(BUILD_DIR, f"{target_name}.uf2"),
             os.path.join(BUILD_DIR, target_name),
@@ -420,12 +475,24 @@ def find_build_artifact(board, algo):
     return None
 
 
+def idf_build_dir_for(board, algo):
+    return os.path.join(BUILD_DIR, f"{board}_{algo}")
+
+
 def resolve_size_input(board, algo, artifact):
     target_name = f"ORBIT_{algo}_{board}"
-    candidates = [
-        os.path.join(BUILD_DIR, target_name),
-        artifact,
-    ]
+    if board in IDF_BOARDS:
+        idf_build_dir = idf_build_dir_for(board, algo)
+        candidates = [
+            os.path.join(idf_build_dir, f"{target_name}.elf"),
+            artifact,
+        ]
+    else:
+        candidates = [
+            os.path.join(BUILD_DIR, f"{target_name}.elf"),
+            os.path.join(BUILD_DIR, target_name),
+            artifact,
+        ]
 
     for path in candidates:
         if path and os.path.exists(path):
@@ -434,12 +501,17 @@ def resolve_size_input(board, algo, artifact):
 
 
 def extract_memory_metrics(board, algo, artifact):
-    metrics = {"flash_bytes": 0, "ram_bytes": 0}
+    metrics = {"flash_bytes": 0, "ram_bytes": 0, "stack_bytes_peak": 0}
     size_input = resolve_size_input(board, algo, artifact)
     if size_input is None:
         return metrics
 
-    size_tool = "arm-none-eabi-size" if board in {"pico", "stm32", "nrf52"} else "size"
+    if board in {"pico", "stm32", "nrf52"}:
+        size_tool = "arm-none-eabi-size"
+    elif board in IDF_BOARDS:
+        size_tool = "riscv32-esp-elf-size"
+    else:
+        size_tool = "size"
     if not command_exists(size_tool):
         return metrics
 
@@ -503,7 +575,10 @@ def should_clean_for_board_switch(board):
 
     return False
 
-def build(board, algo, clean=False):
+def build(board, algo, clean=False, energy_runs=None, no_stdio_wait=False):
+    if board in IDF_BOARDS:
+        return build_idf(board, algo, clean=clean, energy_runs=energy_runs, no_stdio_wait=no_stdio_wait)
+
     if not clean and should_clean_for_board_switch(board):
         log("Detected incompatible cached build configuration; cleaning build directory first...")
         clean = True
@@ -523,6 +598,10 @@ def build(board, algo, clean=False):
             " -DCMAKE_ASM_COMPILER=arm-none-eabi-gcc"
             " -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
         )
+    if energy_runs is not None:
+        extra_cmake_args += f" -DORBIT_ENERGY_RUNS={int(energy_runs)}"
+    if no_stdio_wait:
+        extra_cmake_args += " -DORBIT_NO_STDIO_WAIT=ON"
     run_command(
         f"cmake -S {PROJECT_ROOT} -B {BUILD_DIR} "
         f"-DBOARD={board} "
@@ -536,6 +615,57 @@ def build(board, algo, clean=False):
     artifact = find_build_artifact(board, algo)
     if artifact is None:
         log("Build failed: No output file found.")
+        sys.exit(1)
+    log(f"Build successful. Artifact located at: {artifact}")
+    return artifact
+
+
+def build_idf(board, algo, clean=False, energy_runs=None, no_stdio_wait=False):
+    if not command_exists("idf.py"):
+        log("ESP-IDF is not active: idf.py was not found on PATH.")
+        log("Run: . ~/esp/esp-idf/export.sh")
+        sys.exit(1)
+
+    board_cfg = IDF_BOARDS[board]
+    project_dir = board_cfg["project_dir"]
+    idf_build_dir = idf_build_dir_for(board, algo)
+    target = board_cfg["idf_target"]
+
+    if clean and os.path.exists(idf_build_dir):
+        log(f"Cleaning ESP-IDF build directory '{idf_build_dir}'...")
+        shutil.rmtree(idf_build_dir)
+
+    os.makedirs(BUILD_DIR, exist_ok=True)
+
+    q_project = shlex.quote(project_dir)
+    q_build = shlex.quote(idf_build_dir)
+    q_root = shlex.quote(PROJECT_ROOT)
+    q_algo = shlex.quote(algo)
+    energy_args = ""
+    if energy_runs is not None:
+        energy_args += f" -DORBIT_ENERGY_RUNS={int(energy_runs)}"
+    if no_stdio_wait:
+        energy_args += " -DORBIT_NO_STDIO_WAIT=ON"
+
+    log(f"Configuring ESP-IDF target {target} with algorithm {algo}...")
+    run_command(
+        f"idf.py -C {q_project} -B {q_build} "
+        f"-DALGO_SELECTED={q_algo} -DORBIT_ROOT={q_root} "
+        f"{energy_args} "
+        f"set-target {target}"
+    )
+
+    log("Building with ESP-IDF...")
+    run_command(
+        f"idf.py -C {q_project} -B {q_build} "
+        f"-DALGO_SELECTED={q_algo} -DORBIT_ROOT={q_root} "
+        f"{energy_args} "
+        "build"
+    )
+
+    artifact = find_build_artifact(board, algo)
+    if artifact is None:
+        log("ESP-IDF build failed: No output file found.")
         sys.exit(1)
     log(f"Build successful. Artifact located at: {artifact}")
     return artifact
@@ -672,17 +802,25 @@ def flash_stm32(binary_path):
     if binary_path.endswith(".bin"):
         flash_cmd = (
             f'openocd -f {openocd_cfg} '
-            f'-c "init; reset init; program {binary_path} 0x08000000 verify; reset run; shutdown"'
+            f'-c "init; reset init; program {binary_path} 0x08000000 verify; reset halt; shutdown"'
         )
     else:
         flash_cmd = (
             f'openocd -f {openocd_cfg} '
-            f'-c "init; reset init; program {binary_path} verify; reset run; shutdown"'
+            f'-c "init; reset init; program {binary_path} verify; reset halt; shutdown"'
         )
 
     log("Flashing STM32 via OpenOCD...")
     run_command(flash_cmd)
     time.sleep(2)
+
+
+def stm32_reset_cmd():
+    openocd_cfg = os.environ.get(
+        "ORBIT_STM32_OPENOCD_CFG",
+        "interface/stlink.cfg -f target/stm32f4x.cfg"
+    )
+    return f'openocd -f {openocd_cfg} -c "init; reset run; shutdown"'
 
 
 def flash_nrf52(binary_path):
@@ -694,6 +832,24 @@ def flash_nrf52(binary_path):
     log("Flashing nRF52 via nrfjprog...")
     run_command(flash_cmd)
     time.sleep(1)
+
+
+def flash_idf(board, algo, port=None):
+    board_cfg = IDF_BOARDS[board]
+    project_dir = board_cfg["project_dir"]
+    idf_build_dir = idf_build_dir_for(board, algo)
+
+    cmd = (
+        f"idf.py -C {shlex.quote(project_dir)} -B {shlex.quote(idf_build_dir)} "
+        f"-DALGO_SELECTED={shlex.quote(algo)} -DORBIT_ROOT={shlex.quote(PROJECT_ROOT)} "
+    )
+    if port:
+        cmd += f"-p {shlex.quote(port)} "
+    cmd += "flash"
+
+    log(f"Flashing {BOARDS[board]['name']} via ESP-IDF...")
+    run_command(cmd)
+    time.sleep(2)
 # ----- Serial Capture and Result Processing -----
 
 def find_serial_port(baud=115200, timeout=30):
@@ -841,19 +997,24 @@ def capture_local_process(binary_path, timeout=300):
 def save_results(lines, output_path, run_index, total_runs, board, algo, memory_metrics=None):
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-    header = None
-    for line in lines:
-        if line.startswith("timestamp_iso"):
-            header = line
-            break
-
-    header_to_write = header or DEFAULT_CSV_HEADER
+    header_to_write = DEFAULT_CSV_HEADER
     fieldnames = next(csv.reader([header_to_write]))
     field_index = {name: idx for idx, name in enumerate(fieldnames)}
+    timestamp_re = re.compile(r"(1970-\d\d-\d\dT\d\d:\d\d:\d\dZ|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)")
 
     data_rows = []
+    require_start_marker = board in {"stm32", "nrf52"}
+    saw_benchmark_start = not require_start_marker
     for line in lines:
-        if line.startswith("1970") or (line[:4].isdigit() and line[4] == "-"):
+        if "ORBIT benchmark starting" in line:
+            saw_benchmark_start = True
+            continue
+        if not saw_benchmark_start:
+            continue
+
+        match = timestamp_re.search(line)
+        if match:
+            line = line[match.start():]
             ts_now = host_timestamp_iso()
             try:
                 parsed = next(csv.reader([line]))
@@ -862,16 +1023,48 @@ def save_results(lines, output_path, run_index, total_runs, board, algo, memory_
             
             if len(parsed) < 2:
                 continue
+            if len(parsed) < len(fieldnames):
+                log(f"Skipping short CSV row with {len(parsed)} field(s): {line[:80]}")
+                continue
+            if len(parsed) > len(fieldnames):
+                extra = parsed[len(fieldnames):]
+                if any(value.strip() for value in extra):
+                    log(
+                        f"Skipping contaminated CSV row with {len(parsed)} field(s); "
+                        f"expected {len(fieldnames)}: {line[:120]}"
+                    )
+                    continue
+                log(f"Trimming trailing empty CSV fields from {len(parsed)} to {len(fieldnames)} fields")
+                parsed = parsed[:len(fieldnames)]
+
+            if parsed[field_index["algorithm"]] != algo:
+                log(
+                    f"Skipping CSV row for unexpected algorithm "
+                    f"{parsed[field_index['algorithm']]!r}; expected {algo!r}"
+                )
+                continue
+            if parsed[field_index["board"]] != board:
+                log(
+                    f"Skipping CSV row for unexpected board "
+                    f"{parsed[field_index['board']]!r}; expected {board!r}"
+                )
+                continue
+            if parsed[field_index["ok"]] not in {"0", "1"}:
+                log(f"Skipping CSV row with invalid ok field: {line[:120]}")
+                continue
             
             parsed[0] = ts_now
             parsed[1] = make_run_id(ts_now, algo, board, parsed[6] if len(parsed) > 6 else "unknown")
             if memory_metrics:
                 flash_idx = field_index.get("flash_bytes")
                 ram_idx = field_index.get("ram_bytes")
+                stack_idx = field_index.get("stack_bytes_peak")
                 if flash_idx is not None and flash_idx < len(parsed):
                     parsed[flash_idx] = str(memory_metrics.get("flash_bytes", 0))
                 if ram_idx is not None and ram_idx < len(parsed):
                     parsed[ram_idx] = str(memory_metrics.get("ram_bytes", 0))
+                if stack_idx is not None and stack_idx < len(parsed):
+                    parsed[stack_idx] = str(memory_metrics.get("stack_bytes_peak", 0))
 
             buf = io.StringIO()
             csv.writer(buf).writerow(parsed)
@@ -890,6 +1083,157 @@ def save_results(lines, output_path, run_index, total_runs, board, algo, memory_
     
     log(f"Run {run_index}/{total_runs} results saved to {output_path}")
     return True
+
+
+def run_one_benchmark(args, algo, output_path):
+    board_info = BOARDS[args.board]
+
+    if not args.build_only and args.archive_existing:
+        archive_existing_result(output_path)
+
+    log(f"Board:      {board_info['name']}")
+    log(f"Algorithm:  {algo}")
+    log(f"Runs:       {args.runs}")
+    log(f"Output CSV: {output_path}")
+
+    binary = build(
+        args.board,
+        algo,
+        clean=args.clean,
+        energy_runs=args.energy_runs,
+        no_stdio_wait=args.no_stdio_wait,
+    )
+    memory_metrics = extract_memory_metrics(args.board, algo, binary)
+
+    if args.build_only:
+        log("Build-only mode enabled; skipping flashing and serial capture.")
+        return
+
+    slow_algos = {"aes_128_gcm", "ml_kem_512"}
+    serial_timeout = 3600 if algo in slow_algos else 300
+
+    for run in range(1, args.runs + 1):
+        log(f"=== Starting run {run}/{args.runs} ===")
+
+        if args.board == "rpi5":
+            if args.flash and run == 1:
+                log("RPi5 runs locally; ignoring --flash.")
+            lines = capture_local_process(binary, timeout=serial_timeout)
+            save_results(lines, output_path, run, args.runs, args.board, algo, memory_metrics=memory_metrics)
+            continue
+
+        port = args.port
+
+        if args.flash:
+            if args.board == "pico":
+                flash_pico_for_run(binary, run)
+            elif args.board == "stm32":
+                if run == 1:
+                    log("Run 1 will flash STM32 via OpenOCD and then capture serial output.")
+                else:
+                    log(f"Run {run}: reflashing STM32 to restart the benchmark...")
+                FLASH_FUNCS[args.board](binary)
+            elif args.board == "nrf52":
+                if run == 1:
+                    log("Run 1 will flash nRF52 via nrfjprog and then capture serial output.")
+                else:
+                    log(f"Run {run}: reflashing nRF52 to restart the benchmark...")
+                FLASH_FUNCS[args.board](binary)
+            elif args.board in IDF_BOARDS:
+                if port is None:
+                    port = find_serial_port(timeout=20)
+                if port is None:
+                    log("ERROR: Could not find serial port - exiting")
+                    sys.exit(1)
+                if run == 1:
+                    log(f"Run 1 will flash {board_info['name']} via ESP-IDF and then capture serial output.")
+                else:
+                    log(f"Run {run}: reflashing {board_info['name']} to restart the benchmark...")
+                flash_idf(args.board, algo, port=port)
+            else:
+                log(f"Auto-flash not yet implemented for {board_info['name']}")
+                log(f"Please flash manually: {binary}")
+                input("Press Enter when the board is running the new firmware ...")
+        else:
+            if run == 1:
+                log("Manual flash mode - please flash the board now")
+                log(f"Binary to flash: {binary}")
+                log("Flash the binary now, then come back here.")
+                input("Press Enter when the board is flashed and ready...")
+            else:
+                log("Reflash or reset the board for the next run:")
+                if args.board == "pico":
+                    log("  Pico: put the board in BOOTSEL mode, copy the UF2, then let it reboot")
+                elif args.board == "stm32":
+                    log("  STM32: flash/reset the board so the benchmark restarts from reset")
+                elif args.board in IDF_BOARDS:
+                    log("  ESP-IDF: flash/reset the board so the benchmark restarts from reset")
+                log(f"  Artifact: {binary}")
+                input("Press Enter when the board is flashed and ready...")
+
+        port = port or find_serial_port(timeout=20)
+        if port is None:
+            log("ERROR: Could not find serial port - exiting")
+            sys.exit(1)
+
+        if args.board == "stm32":
+            lines = capture_serial_after_reset(
+                port,
+                baud=BOARDS[args.board]["baud"],
+                timeout=serial_timeout,
+                reset_cmd=stm32_reset_cmd(),
+            )
+        elif args.board == "nrf52":
+            lines = capture_serial_after_reset(
+                port,
+                baud=BOARDS[args.board]["baud"],
+                timeout=serial_timeout,
+                reset_cmd="nrfjprog --reset -f nrf52",
+            )
+        else:
+            lines = capture_serial(port, baud=BOARDS[args.board]["baud"], timeout=serial_timeout)
+        save_results(lines, output_path, run, args.runs, args.board, algo, memory_metrics=memory_metrics)
+
+    log(f"\nAll {args.runs} runs complete for {algo}:")
+    log(f"Results saved to: {output_path}")
+
+    if os.path.exists(output_path):
+        postprocess_csv(output_path)
+    else:
+        log("No results CSV was created, so post-processing was skipped.")
+
+
+def parse_suite_algorithms(value):
+    if not value:
+        return list(ALGORITHMS)
+
+    selected = []
+    for raw in value.split(","):
+        algo = raw.strip()
+        if not algo:
+            continue
+        if algo not in ALGORITHMS:
+            log(f"Unknown algorithm in --suite-algos: {algo}")
+            log(f"Available algorithms: {', '.join(ALGORITHMS)}")
+            sys.exit(1)
+        selected.append(algo)
+
+    if not selected:
+        log("--suite-algos did not contain any valid algorithms")
+        sys.exit(1)
+    return selected
+
+
+def output_path_for(args, algo, suite_count):
+    if args.output is None:
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+        return os.path.join(RESULTS_DIR, f"{args.board}_{algo}.csv")
+
+    if suite_count <= 1:
+        return args.output
+
+    base, ext = os.path.splitext(args.output)
+    return f"{base}_{algo}{ext or '.csv'}"
 
 # ----- Main -----
 def main():
@@ -910,10 +1254,17 @@ Examples:
     )
     parser.add_argument("--board", required=False, choices=BOARDS.keys(), help="Target board")
     parser.add_argument("--algo", required=False, choices=ALGORITHMS, help="Algorithm to benchmark")
+    parser.add_argument("--suite", action="store_true", help="Run the full algorithm suite for the selected board")
+    parser.add_argument("--suite-algos", default=None, help="Comma-separated algorithm list for --suite (default: all supported algorithms)")
+    parser.add_argument("--pause-between-algos", action="store_true", help="Pause between suite algorithms for WaveForms setup")
     parser.add_argument("--runs", type=int, default=5, help="Number of independent runs (default: 5)")
     parser.add_argument("--output", default=None, help="Output CSV file path (default: results/<board>_<algo>.csv)")
+    parser.add_argument("--archive-existing", action="store_true",
+                        help="Archive an existing output CSV before writing a new one")
     parser.add_argument("--flash", action="store_true", help="Automatically flash the firmware after building")
     parser.add_argument("--build-only", action="store_true", help="Build firmware and exit without flashing or capturing serial output")
+    parser.add_argument("--energy-runs", type=int, default=None, help="Build firmware that repeats the benchmark this many times internally, with one frame trigger per internal run")
+    parser.add_argument("--no-stdio-wait", action="store_true", help="Build firmware that starts without waiting for a USB/serial connection")
     parser.add_argument("--check", action="store_true", help="Check local prerequisites for Pico/STM32 workflows and exit")
     parser.add_argument("--clean", action="store_true", help="Clean build directory before building")
     parser.add_argument("--port", default=None, help="Serial port to use for capturing results (default: auto-detect)")
@@ -927,7 +1278,11 @@ Examples:
     if args.check:
         sys.exit(run_prereq_check(board=args.board))
 
-    if not args.board or not args.algo:
+    if args.energy_runs is not None and args.energy_runs < 1:
+        log("--energy-runs must be at least 1")
+        sys.exit(1)
+
+    if not args.board or (not args.algo and not args.suite):
         print("\n=== ORBIT Interactive Mode ===")
 
         if not args.board:
@@ -945,7 +1300,7 @@ Examples:
                     break
                 print("Invalid choice, please try again.")
 
-        if not args.algo:
+        if not args.algo and not args.suite:
             print("\nAvailable algorithms:")
             for i, algo in enumerate(ALGORITHMS, 1):
                 print(f"  [{i}] {algo}")
@@ -964,96 +1319,24 @@ Examples:
             if runs_input.isdigit():
                 args.runs = int(runs_input)
 
-    board_info = BOARDS[args.board]
-    if args.output is None:
-        os.makedirs(RESULTS_DIR, exist_ok=True)
-        args.output = os.path.join(RESULTS_DIR, f"{args.board}_{args.algo}.csv")
+    algorithms = parse_suite_algorithms(args.suite_algos) if args.suite else [args.algo]
+    pause_between_algos = args.pause_between_algos or args.suite
 
-    if not args.build_only:
-        archive_existing_result(args.output)
+    for index, algo in enumerate(algorithms, 1):
+        if args.suite:
+            log(f"=== Suite algorithm {index}/{len(algorithms)}: {algo} ===")
 
-    log(f"Board:      {board_info['name']}")
-    log(f"Algorithm:  {args.algo}")
-    log(f"Runs:       {args.runs}")
-    log(f"Output CSV: {args.output}")
+        output_path = output_path_for(args, algo, len(algorithms))
+        run_one_benchmark(args, algo, output_path)
 
-    binary = build(args.board, args.algo, clean=args.clean)
-    memory_metrics = extract_memory_metrics(args.board, args.algo, binary)
+        if pause_between_algos and index < len(algorithms) and not args.build_only:
+            next_algo = algorithms[index]
+            log(f"Completed {algo}.")
+            log(f"Set up WaveForms for {next_algo}, arm the trigger, then return here.")
+            input("Press Enter to build/flash and start the next algorithm ...")
 
-    if args.build_only:
-        log("Build-only mode enabled; skipping flashing and serial capture.")
-        return
-
-    slow_algos = {"aes_128_gcm", "ml_kem_512"}
-    serial_timeout = 3600 if args.algo in slow_algos else 300
-
-    for run in range(1, args.runs + 1):
-        log(f"=== Starting run {run}/{args.runs} ===")
-
-        if args.board == "rpi5":
-            if args.flash and run == 1:
-                log("RPi5 runs locally; ignoring --flash.")
-            lines = capture_local_process(binary, timeout=serial_timeout)
-            save_results(lines, args.output, run, args.runs, args.board, args.algo, memory_metrics=memory_metrics)
-            continue
-
-        if args.flash:
-            if args.board == "pico":
-                flash_pico_for_run(binary, run)
-            elif args.board == "stm32":
-                if run == 1:
-                    log("Run 1 will flash STM32 via OpenOCD and then capture serial output.")
-                else:
-                    log(f"Run {run}: reflashing STM32 to restart the benchmark...")
-                FLASH_FUNCS[args.board](binary)
-            elif args.board == "nrf52":
-                if run == 1:
-                    log("Run 1 will flash nRF52 via nrfjprog and then capture serial output.")
-                else:
-                    log(f"Run {run}: reflashing nRF52 to restart the benchmark...")
-                FLASH_FUNCS[args.board](binary)
-            else:
-                log(f"Auto-flash not yet implemented for {BOARDS[args.board]['name']}")
-                log(f"Please flash manually: {binary}")
-                input("Press Enter when the board is running the new firmware ...")
-        else:
-            if run == 1:
-                log("Manual flash mode - please flash the board now")
-                log(f"Binary to flash: {binary}")
-                log("Flash the binary now, then come back here.")
-                input("Press Enter when the board is flashed and ready...")
-            else:
-                log("Reflash or reset the board for the next run:")
-                if args.board == "pico":
-                    log("  Pico: put the board in BOOTSEL mode, copy the UF2, then let it reboot")
-                elif args.board == "stm32":
-                    log("  STM32: flash/reset the board so the benchmark restarts from reset")
-                log(f"  Artifact: {binary}")
-                input("Press Enter when the board is flashed and ready...")
-
-        port = args.port or find_serial_port(timeout=20)
-        if port is None:
-            log("ERROR: Could not find serial port - exiting")
-            sys.exit(1)
-
-        if args.board == "nrf52":
-            lines = capture_serial_after_reset(
-                port,
-                baud=BOARDS[args.board]["baud"],
-                timeout=serial_timeout,
-                reset_cmd="nrfjprog --reset -f nrf52",
-            )
-        else:
-            lines = capture_serial(port, baud=BOARDS[args.board]["baud"], timeout=serial_timeout)
-        save_results(lines, args.output, run, args.runs, args.board, args.algo, memory_metrics=memory_metrics)
-    
-    log(f"\nAll {args.runs} runs complete:")
-    log(f"Results saved to: {args.output}")
-
-    if os.path.exists(args.output):
-        postprocess_csv(args.output)
-    else:
-        log("No results CSV was created, so post-processing was skipped.")
+    if args.suite:
+        log("Full suite complete.")
 
     
 if __name__ == "__main__":

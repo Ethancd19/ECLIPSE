@@ -32,6 +32,15 @@
 #ifndef PLATFORM_BOOT_DELAY_MS
 #define PLATFORM_BOOT_DELAY_MS 2000
 #endif
+#ifndef ORBIT_ENERGY_RUNS
+#define ORBIT_ENERGY_RUNS 1
+#endif
+#ifndef ORBIT_INTER_RUN_DELAY_MS
+#define ORBIT_INTER_RUN_DELAY_MS 500
+#endif
+
+/* AEAD Mode */
+#ifndef IS_KEM
 
 #ifndef ORBIT_MAX_MSG_LEN
 #define ORBIT_MAX_MSG_LEN    16384
@@ -74,9 +83,6 @@ static const uint32_t WARMUP_ITERS[NUM_MSG_SIZES] = {1000, 1000, 1000, 500};
 #define MAX_MSG_LEN          ORBIT_MAX_MSG_LEN
 #define MAX_CT_LEN           (MAX_MSG_LEN + 64)
 #define BENCH_AD_LEN         32
-
-/* AEAD Mode */
-#ifndef IS_KEM
 
 #include "crypto_aead.h"
 #include "api.h"
@@ -274,15 +280,7 @@ static void bench_kem_op(const char *op_name, uint32_t iterations, csv_row_t *ro
 
 #endif /* IS_KEM */
 
-int main(void) {
-    platform_init();
-    platform_puts("ORBIT benchmark starting...\r\n");
-
-    while (!platform_stdio_ready()) {
-        platform_delay_ms(100);
-    }
-    platform_delay_ms(PLATFORM_BOOT_DELAY_MS);
-
+static void run_benchmark_once(void) {
     print_csv_header();
 #ifdef IS_KEM
     PQCLEAN_MLKEM512_CLEAN_crypto_kem_keypair(kem_pk, kem_sk);
@@ -351,6 +349,30 @@ int main(void) {
         print_csv_row(&row);
     }
 #endif
+
+}
+
+int main(void) {
+    platform_init();
+    platform_puts("ORBIT benchmark starting...\r\n");
+
+#ifndef ORBIT_NO_STDIO_WAIT
+    while (!platform_stdio_ready()) {
+        platform_delay_ms(100);
+    }
+#endif
+    platform_delay_ms(PLATFORM_BOOT_DELAY_MS);
+
+    for (uint32_t orbit_run = 0; orbit_run < ORBIT_ENERGY_RUNS; orbit_run++) {
+        if (orbit_run > 0) {
+            platform_delay_ms(ORBIT_INTER_RUN_DELAY_MS);
+        }
+
+        platform_frame_trigger_high();
+        platform_delay_ms(50);
+        run_benchmark_once();
+        platform_frame_trigger_low();
+    }
 
     platform_puts("ORBIT benchmark completed.\r\n");
 

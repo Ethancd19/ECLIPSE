@@ -8,6 +8,7 @@
 
 #define PLATFORM_FREQ_HZ 125000000UL
 #define TRIGGER_PIN 15
+#define FRAME_TRIGGER_PIN 14
 
 static inline void _systick_init(void) {
     systick_hw->csr = 0;
@@ -38,6 +39,10 @@ static inline void platform_init(void) {
     gpio_init(TRIGGER_PIN);
     gpio_set_dir(TRIGGER_PIN, GPIO_OUT);
     gpio_put(TRIGGER_PIN, 0);
+
+    gpio_init(FRAME_TRIGGER_PIN);
+    gpio_set_dir(FRAME_TRIGGER_PIN, GPIO_OUT);
+    gpio_put(FRAME_TRIGGER_PIN, 0);
 }
 
 static inline void platform_trigger_high(void) {
@@ -46,6 +51,14 @@ static inline void platform_trigger_high(void) {
 
 static inline void platform_trigger_low(void) {
     gpio_put(TRIGGER_PIN, 0);
+}
+
+static inline void platform_frame_trigger_high(void) {
+    gpio_put(FRAME_TRIGGER_PIN, 1);
+}
+
+static inline void platform_frame_trigger_low(void) {
+    gpio_put(FRAME_TRIGGER_PIN, 0);
 }
 
 static inline uint32_t platform_freq_hz(void) {
