@@ -7,8 +7,9 @@
 #define PLATFORM_FREQ_HZ 64000000UL
 
 /*
- * Defaults target the nRF52832 DK (PCA10040) virtual COM port pins.
- * Adjust these if you use a different nRF52 board wiring layout.
+ * Defaults target the nRF52840 DK (PCA10056) virtual COM port pins.
+ * Trigger defaults remain on P0.13/P0.14 so they are easy to wire to AD3.
+ * Adjust these if your board wiring differs.
  */
 #define UART_TX_PIN 6u
 #define UART_RX_PIN 8u

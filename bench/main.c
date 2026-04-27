@@ -283,6 +283,8 @@ static void bench_kem_op(const char *op_name, uint32_t iterations, csv_row_t *ro
 static void run_benchmark_once(void) {
     print_csv_header();
 #ifdef IS_KEM
+    platform_delay_ms(100);
+
     PQCLEAN_MLKEM512_CLEAN_crypto_kem_keypair(kem_pk, kem_sk);
     PQCLEAN_MLKEM512_CLEAN_crypto_kem_enc(kem_ct, kem_ss_enc, kem_pk);
 
@@ -312,6 +314,7 @@ static void run_benchmark_once(void) {
 
         bench_kem_op(ops[op], kem_iters, &row);
         print_csv_row(&row);
+        platform_delay_ms(50);
     }
 
 #else

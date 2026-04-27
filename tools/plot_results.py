@@ -42,7 +42,7 @@ BOARD_LABELS = {
     "esp32c61": "ESP32-C61",
     "stm32": "STM32 F446RE",
     "pico": "RP2040 Pico",
-    "nrf52": "nRF52832",
+    "nrf52": "nRF52840 DK",
     "rpi5": "Raspberry Pi 5",
 }
 
@@ -113,6 +113,15 @@ def save_figure(fig, output_path, filename):
     plt.close(fig)
     print(f"Saved: {path}")
 
+def place_comparison_legend(ax, ncol=1):
+    ax.legend(
+        title="Platform",
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+        ncol=ncol,
+    )
+
 def board_label(board):
     return BOARD_LABELS.get(str(board), str(board))
 
@@ -136,6 +145,23 @@ def summary_value(df, board, algo, col, msg_len=None, note=None):
         return None
     value = subset[col].iloc[0]
     return None if pd.isna(value) else value
+
+def nonzero_metric_boards(df, boards, col, algorithms=None, msg_len=None, note=None):
+    kept = []
+    for board in boards:
+        board_df = df[df["board"] == board]
+        if algorithms is not None:
+            board_df = board_df[board_df["algorithm"].isin(algorithms)]
+        if msg_len is not None:
+            board_df = board_df[board_df["msg_len"] == msg_len]
+        if note is not None:
+            board_df = board_df[board_df["notes"] == note]
+        if col not in board_df.columns or board_df.empty:
+            continue
+        series = board_df[col].fillna(0)
+        if (series != 0).any():
+            kept.append(board)
+    return kept
 
 def plot_summary_aead_lines(df, output_dir, metric_key, operation_label="Encryption"):
     col, ylabel = COMPARISON_METRICS[metric_key]
@@ -171,7 +197,7 @@ def plot_summary_aead_lines(df, output_dir, metric_key, operation_label="Encrypt
         if metric_key in {"cycles_per_byte", "latency", "energy_per_byte", "energy_per_op"}:
             ax.set_yscale("log")
         ax.set_title(f"{ALGORITHM_LABELS[algo]} {operation_label} Comparison")
-        ax.legend(title="Platform")
+        place_comparison_legend(ax)
         plt.tight_layout()
         save_figure(fig, output_dir, f"compare_{algo}_{metric_key}.png")
 
@@ -182,6 +208,10 @@ def plot_summary_metric_grid(df, output_dir, metric_key, msg_len=1024):
         return
 
     boards = sorted(df["board"].dropna().unique().tolist())
+    boards = nonzero_metric_boards(df, boards, col, algorithms=AEAD_ALGORITHMS, msg_len=msg_len)
+    if not boards:
+        print(f"Skipping {metric_key}: no boards with nonzero {col} at msg_len={msg_len}")
+        return
     labels = [ALGORITHM_LABELS[a] for a in AEAD_ALGORITHMS]
     x = range(len(labels))
     width = 0.8 / max(len(boards), 1)
@@ -202,7 +232,7 @@ def plot_summary_metric_grid(df, output_dir, metric_key, msg_len=1024):
         ax.set_yscale("log")
     msg_label = MSG_LABELS[MSG_SIZES.index(msg_len)] if msg_len in MSG_SIZES else f"{msg_len}B"
     ax.set_title(f"AEAD {ylabel} at {msg_label}")
-    ax.legend(title="Platform")
+    place_comparison_legend(ax)
     plt.tight_layout()
     save_figure(fig, output_dir, f"compare_aead_{metric_key}_{msg_len}.png")
 
@@ -215,6 +245,10 @@ def plot_summary_mlkem(df, output_dir, metric_key="latency"):
 
     ops = [("keygen", "KeyGen"), ("encap", "Encapsulate"), ("decap", "Decapsulate")]
     boards = sorted(df["board"].dropna().unique().tolist())
+    boards = nonzero_metric_boards(df, boards, col, algorithms=["ml_kem_512"])
+    if not boards:
+        print(f"Skipping ML-KEM {metric_key}: no boards with nonzero {col}")
+        return
     x = range(len(ops))
     width = 0.8 / max(len(boards), 1)
 
@@ -232,7 +266,7 @@ def plot_summary_mlkem(df, output_dir, metric_key="latency"):
     ax.set_ylabel(ylabel)
     ax.set_yscale("log")
     ax.set_title(f"ML-KEM-512 {ylabel} Comparison")
-    ax.legend(title="Platform")
+    place_comparison_legend(ax)
     plt.tight_layout()
     save_figure(fig, output_dir, f"compare_mlkem_{metric_key}.png")
 
@@ -410,6 +444,8 @@ def main():
                         help="Generate platform comparison plots from --summary_files")
     parser.add_argument("--comparison_msg_len", type=int, default=1024,
                         help="Message length for grouped AEAD comparison bars")
+    parser.add_argument("--boards", default=None,
+                        help="Comma-separated board filter for summary comparisons, e.g. esp32c61,stm32,pico")
     args = parser.parse_args()
  
     os.makedirs(args.output_dir, exist_ok=True)
@@ -417,6 +453,9 @@ def main():
  
     if args.summary_files:
         df = load_summary_files(args.summary_files)
+        if args.boards:
+            wanted = [b.strip() for b in args.boards.split(",") if b.strip()]
+            df = df[df["board"].isin(wanted)]
         if args.compare:
             print(f"Loaded {len(df)} summary rows from {len(args.summary_files)} file(s)")
             plot_summary_aead_lines(df, args.output_dir, "cycles_per_byte")

@@ -1,5 +1,5 @@
 # ===============================================================
-# board_nrf52.cmake - Nordic nRF52832 DK (PCA10040, Cortex-M4)
+# board_nrf52.cmake - Nordic nRF52840 DK (PCA10056, Cortex-M4F)
 # Included by top-level CMakeLists.txt when BOARD=nrf52 is selected
 #
 # Requires Nordic nRF5 SDK at NRF5_SDK_PATH (default: ~/nRF5_SDK)
@@ -31,9 +31,9 @@ message(STATUS "nRF5 SDK found at: ${NRF5_PATH}")
 
 set(NRF_MDK_DIR      "${NRF5_PATH}/modules/nrfx/mdk")
 set(NRF_CMSIS_INC    "${NRF5_PATH}/components/toolchain/cmsis/include")
-set(LINKER_SCRIPT    "${NRF_MDK_DIR}/nrf52832_xxaa.ld")
-set(STARTUP_FILE     "${NRF_MDK_DIR}/gcc_startup_nrf52.S")
-set(SYSTEM_FILE      "${NRF_MDK_DIR}/system_nrf52.c")
+set(LINKER_SCRIPT    "${NRF_MDK_DIR}/nrf52840_xxaa.ld")
+set(STARTUP_FILE     "${NRF_MDK_DIR}/gcc_startup_nrf52840.S")
+set(SYSTEM_FILE      "${NRF_MDK_DIR}/system_nrf52840.c")
 set(TARGET_NAME      "ORBIT_${ALGO_SELECTED}_nrf52")
 
 foreach(required_file
@@ -65,7 +65,7 @@ target_include_directories(${TARGET_NAME} PRIVATE
 )
 
 target_compile_definitions(${TARGET_NAME} PRIVATE
-    NRF52832_XXAA
+    NRF52840_XXAA
     ALGO_NAME=${ALGO_SELECTED}
     BOARD_NAME="nrf52"
     VERSION_STR="0.1.0"

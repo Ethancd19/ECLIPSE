@@ -35,7 +35,7 @@ BOARDS = {
         "baud": 115200,
     },
     "nrf52": {
-        "name": "Nordic nRF52832 (PCA10040)",
+        "name": "Nordic nRF52840 DK (PCA10056)",
         "arch": "armv7e-m",
         "flash_method": "nrfjprog",
         "baud": 115200,
@@ -825,9 +825,9 @@ def stm32_reset_cmd():
 
 def flash_nrf52(binary_path):
     if binary_path.endswith(".hex"):
-        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --verify -f nrf52 && nrfjprog --reset -f nrf52'
+        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --verify -f nrf52'
     else:
-        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --sectorerase --verify -f nrf52 && nrfjprog --reset -f nrf52'
+        flash_cmd = f'nrfjprog --eraseall -f nrf52 && nrfjprog --program "{binary_path}" --sectorerase --verify -f nrf52'
 
     log("Flashing nRF52 via nrfjprog...")
     run_command(flash_cmd)
@@ -852,11 +852,21 @@ def flash_idf(board, algo, port=None):
     time.sleep(2)
 # ----- Serial Capture and Result Processing -----
 
+def _serial_port_sort_key(device: str):
+    match = re.search(r"tty(?:ACM|USB)(\d+)$", device)
+    if match:
+        return (0, int(match.group(1)))
+    return (1, device)
+
+
 def find_serial_port(baud=115200, timeout=30):
     log(f"Waiting for serial port (timeout {timeout}s)...")
     start = time.time()
     while time.time() - start < timeout:
-        ports = serial.tools.list_ports.comports()
+        ports = sorted(
+            serial.tools.list_ports.comports(),
+            key=lambda p: _serial_port_sort_key(p.device),
+        )
         for port in ports:
             if "ttyACM" in port.device or "ttyUSB" in port.device:
                 log(f"Found serial port: {port.device}")
@@ -906,6 +916,7 @@ def capture_serial_after_reset(port, baud=115200, timeout=300, reset_cmd=None, s
     log(f"Opening {port} at {baud} baud before reset...")
     lines = []
     pending = ""
+    reset_proc = None
 
     try:
         with serial.Serial(port, baudrate=baud, timeout=1) as ser:
@@ -915,15 +926,17 @@ def capture_serial_after_reset(port, baud=115200, timeout=300, reset_cmd=None, s
             if reset_cmd:
                 time.sleep(settle_ms / 1000.0)
                 log(f"Issuing reset while serial port is open: {reset_cmd}")
-                ret = subprocess.call(reset_cmd, shell=True)
-                if ret != 0:
-                    log(f"Reset command failed with exit code {ret}")
-                    sys.exit(1)
+                reset_proc = subprocess.Popen(reset_cmd, shell=True)
 
             start = time.time()
             while time.time() - start < timeout:
                 chunk = ser.read(ser.in_waiting or 1)
                 if not chunk:
+                    if reset_proc is not None:
+                        ret = reset_proc.poll()
+                        if ret is not None and ret != 0:
+                            log(f"Reset command failed with exit code {ret}")
+                            sys.exit(1)
                     continue
 
                 text = chunk.decode("utf-8", errors="replace")
@@ -937,6 +950,11 @@ def capture_serial_after_reset(port, baud=115200, timeout=300, reset_cmd=None, s
                     print(f"    {line}")
                     lines.append(line)
                     if "ORBIT benchmark completed" in line:
+                        if reset_proc is not None:
+                            ret = reset_proc.wait(timeout=5)
+                            if ret != 0:
+                                log(f"Reset command failed with exit code {ret}")
+                                sys.exit(1)
                         log("Benchmark complete signal received")
                         return lines
 
@@ -944,6 +962,11 @@ def capture_serial_after_reset(port, baud=115200, timeout=300, reset_cmd=None, s
                 line = pending.rstrip("\r")
                 print(f"    {line}")
                 lines.append(line)
+            if reset_proc is not None:
+                ret = reset_proc.wait(timeout=5)
+                if ret != 0:
+                    log(f"Reset command failed with exit code {ret}")
+                    sys.exit(1)
     except serial.SerialException as e:
         log(f"Error reading serial port: {e}")
         sys.exit(1)
@@ -1003,7 +1026,7 @@ def save_results(lines, output_path, run_index, total_runs, board, algo, memory_
     timestamp_re = re.compile(r"(1970-\d\d-\d\dT\d\d:\d\d:\d\dZ|\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)")
 
     data_rows = []
-    require_start_marker = board in {"stm32", "nrf52"}
+    require_start_marker = board in {"stm32"}
     saw_benchmark_start = not require_start_marker
     for line in lines:
         if "ORBIT benchmark starting" in line:

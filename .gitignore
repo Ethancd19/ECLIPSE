@@ -76,7 +76,6 @@ picotool/
 # -----------------------------------------------------------------------------
 results/archived/*
 !results/archived/README.md
-results/traces/
 results/*_clean_probe.csv
 results/*_connection_probe.csv
 results/*_validation.csv
