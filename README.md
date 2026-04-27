@@ -39,35 +39,42 @@ All algorithms use publicly available reference C implementations. Hardware acce
 ```text
 ORBIT/
 ├── algorithms/
-│   ├── ascon_aead128/      # Ascon-128 reference (NIST SP 800-232)
-│   ├── ascon_aead80pq/     # Ascon-80pq reference
-│   ├── gift_cofb/          # GIFT-COFB opt32 (NIST LWC finalist)
-│   ├── aes_128_gcm/        # AES-128-GCM (cifra library, software-only)
-│   └── ml_kem_512/         # ML-KEM-512 (PQClean reference, FIPS 203)
+│   ├── ascon_aead128/           # Ascon-128 reference (NIST SP 800-232)
+│   ├── ascon_aead80pq/          # Ascon-80pq reference
+│   ├── gift_cofb/               # GIFT-COFB opt32 (NIST LWC finalist)
+│   ├── aes_128_gcm/             # AES-128-GCM (cifra library, software-only)
+│   └── ml_kem_512/              # ML-KEM-512 (PQClean reference, FIPS 203)
 ├── bench/
-│   ├── main.c              # Benchmark loop, KAT correctness checks
-│   ├── util.c / util.h     # CSV output, statistics, timing utilities
-│   └── platform.h          # Resolved from platforms/<board>/platform.h
+│   ├── main.c                   # Benchmark loop, KAT correctness checks
+│   ├── util.c / util.h          # CSV output, statistics, timing utilities
+│   └── platform.h               # Resolved from platforms/<board>/platform.h
 ├── platforms/
-│   ├── pico/platform.h     # RP2040: SysTick + time_us_64 cycle counter
-│   ├── stm32/platform.h    # STM32F446: DWT CYCCNT cycle counter
-│   ├── nrf52/platform.h    # nRF52840 DK: TIMER1-based cycle counter
-│   ├── esp32c61/           # ESP32-C61: ESP-IDF target support
-│   └── rpi5/platform.h     # RPi5: native Linux timer/counter backend
+│   ├── pico/platform.h          # RP2040: SysTick + time_us_64 cycle counter
+│   ├── stm32/platform.h         # STM32F446: DWT CYCCNT cycle counter
+│   ├── nrf52/platform.h         # nRF52840 DK: TIMER1-based cycle counter
+│   ├── esp32c61/                # ESP32-C61: ESP-IDF target support
+│   └── rpi5/platform.h          # RPi5: native Linux timer/counter backend
 ├── results/
-│   ├── archived/           # Preliminary single-run data (superseded)
-│   └── *.csv               # Final 5-run benchmark datasets
+│   ├── archived/                # Preliminary single-run data (superseded)
+│   ├── summary/                 # Per-board summaries and security-normalized metrics
+│   └── *.csv                    # Final 5-run benchmark datasets
 ├── scripts/
-│   └── attach_pico.ps1     # Windows: auto-attach Pico to WSL2 via usbipd
+│   └── attach_pico.ps1          # Windows: auto-attach Pico to WSL2 via usbipd
 ├── tools/
-│   ├── orbit.py            # Benchmark orchestration and serial capture
-│   └── plot_results.py     # Result visualization
+│   ├── orbit.py                 # Benchmark orchestration and serial capture
+│   ├── process_energy.py        # Merge WaveForms captures into ORBIT result CSVs
+│   ├── summarize_results.py     # Build per-board summary and audit outputs
+│   ├── calc_security_metrics.py # Compute classical and quantum-normalized metrics
+│   ├── archive_results.py       # Archive prior result CSVs before overwrite
+│   └── plot_results.py          # Result visualization
 ├── include/
-│   └── crypto_aead.h       # Shared AEAD interface
-├── CMakeLists.txt          # Pico SDK build (ARM targets)
-├── setup.sh                # One-shot environment setup script
-└── requirements.txt        # Python dependencies
+│   └── crypto_aead.h            # Shared AEAD interface
+├── CMakeLists.txt               # Pico SDK build (ARM targets)
+├── setup.sh                     # One-shot environment setup script
+└── requirements.txt             # Python dependencies
 ```
+
+Full per-run trace datasets are generated locally under `results/traces/` and are hosted separately on Zenodo due to GitHub file size limits.
 
 ---
 
@@ -427,23 +434,23 @@ For long captures produced with `--energy-runs`, one frame trigger is emitted pe
 
 One CSV row per (algorithm, platform, message size) per run, prefixed with a `run` index.
 
-| Field                 | Description                                     |
-| --------------------- | ----------------------------------------------- |
-| `run`                 | Independent run index (1-5)                     |
-| `timestamp_iso`       | UTC timestamp injected from host clock          |
-| `algorithm`           | Algorithm name                                  |
-| `board`               | Target platform identifier                      |
-| `arch`                | Instruction set architecture                    |
-| `freq_hz`             | Core clock frequency (Hz)                       |
-| `msg_len`             | Plaintext length (bytes)                        |
-| `iterations`          | Iterations for this configuration               |
-| `enc_cycles_total`    | Total cycles across all iterations (encryption) |
-| `enc_cycles_per_byte` | Cycles per plaintext byte (primary metric)      |
-| `enc_time_us_per_op`  | Microseconds per encryption operation           |
-| `energy_uJ_enc_total` | Total energy: Over the encryption window        |
-| `avg_power_mW_enc`    | Average power draw during encryption            |
-| `ok`                  | 1 = KAT passed, 0 = KAT failed                  |
-| `notes`               | Any output notes made during benchmark          |
+| Field                 | Description                                        |
+| --------------------- | -------------------------------------------------- |
+| `run`                 | Independent run index (1-5)                        |
+| `timestamp_iso`       | UTC timestamp injected from host clock             |
+| `algorithm`           | Algorithm name                                     |
+| `board`               | Target platform identifier                         |
+| `arch`                | Instruction set architecture                       |
+| `freq_hz`             | Core clock frequency (Hz)                          |
+| `msg_len`             | Plaintext length (bytes)                           |
+| `iterations`          | Iterations for this configuration                  |
+| `enc_cycles_total`    | Total cycles across all iterations (encryption)    |
+| `enc_cycles_per_byte` | Cycles per plaintext byte (primary metric)         |
+| `enc_time_us_per_op`  | Microseconds per encryption operation              |
+| `energy_uJ_enc_total` | Total energy integrated over the encryption window |
+| `avg_power_mW_enc`    | Average power draw during encryption               |
+| `ok`                  | 1 = KAT passed, 0 = KAT failed                     |
+| `notes`               | Any output notes made during benchmark             |
 
 ---
 
@@ -460,7 +467,7 @@ Security-normalized derived metrics:
 
 Full per-run trace datasets are generated locally in `results/traces/` but are not committed to GitHub because several files exceed GitHub's size limits.
 
-Full per-run trace archive (Zenodo): `https://doi.org/<DOI>`
+Full per-run trace archive (Zenodo): `https://doi.org/10.5281/zenodo.19804002`
 
 Preliminary single-run data (collected before the 5-run protocol): `results/archived/`
 
@@ -499,7 +506,7 @@ Running on native Linux (Ubuntu, Debian, etc.) without WSL2:
 ```text
 Duval, E.C. (2026). Cross-Architecture Benchmarking of Lightweight and
 Post-Quantum Cryptography on Constrained IoT Platforms.
-M.Eng. Project & Report, Virginia Polyechnic Institute and State University
+M.Eng. Project & Report, Virginia Polytechnic Institute and State University
 ```
 
 ---
