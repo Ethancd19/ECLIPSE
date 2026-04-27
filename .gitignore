@@ -80,6 +80,7 @@ results/*_clean_probe.csv
 results/*_connection_probe.csv
 results/*_validation.csv
 results/*.bak
+results/traces/
 plots/
 
 # -----------------------------------------------------------------------------
