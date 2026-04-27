@@ -1,8 +1,8 @@
 # ORBIT
 
-**Open-Source Reference Benchmark for IoT Cryptography**
+## Open-Source Reference Benchmark for IoT Cryptography
 
-ORBIT is a portable bare-metal C benchmarking framework for evaluating NIST-standardized lightweight and post-quantum cryptographic algorithms on constrained IoT microcontrollers. It measures performance (cycles/byte), energy consumption ($\mu$J/operation), and memory footprint across multiple embedded architectures under identical, reproducible conditions.
+ORBIT is a portable bare-metal C benchmarking framework for evaluating lightweight and post-quantum cryptographic algorithms on constrained IoT platforms. It measures performance (cycles/byte), energy consumption ($\mu$J/operation), and memory footprint across multiple embedded architectures under identical, reproducible conditions.
 
 Developed as a part of an M.Eng. Project & Report in Computer Engineering at Virginia Polytechnic Institute and State University, 2026.
 
@@ -10,13 +10,13 @@ Developed as a part of an M.Eng. Project & Report in Computer Engineering at Vir
 
 ## Algorithms
 
-| Algorithm   | Type | Standard          | Notes                                 |
-| ----------- | ---- | ----------------- | ------------------------------------- |
-| Ascon-128   | AEAD | NIST SP 800-232   | Primary LWC standard                  |
-| Ascon-80pq  | AEAD | NIST SP 800-232   | Quantum-hardened symmetric hedge      |
-| GIFT-COFB   | AEAD | NIST LWC Finalist | SPN-based, compact hardware footprint |
-| AES-128-GCM | AEAD | NIST SP 800-38D   | Baseline - industry standard          |
-| ML-KEM-512  | KEM  | FIPS 203          | Post-quantum key encapsulation        |
+| Algorithm     | Type | Standard / Status    | Notes                                 |
+| ------------- | ---- | -------------------- | ------------------------------------- |
+| Ascon-AEAD128 | AEAD | NIST SP 800-232      | Primary lightweight benchmark         |
+| Ascon-80pq    | AEAD | Ascon family variant | PQ-oriented symmetric hedge           |
+| GIFT-COFB     | AEAD | NIST LWC Finalist    | SPN-based, compact hardware footprint |
+| AES-128-GCM   | AEAD | NIST SP 800-38D      | Baseline industry standard            |
+| ML-KEM-512    | KEM  | FIPS 203             | Post-quantum key encapsulation        |
 
 All algorithms use publicly available reference C implementations. Hardware acceleration is explicitly disabled on all platforms for cross-architecture comparability.
 
@@ -24,13 +24,13 @@ All algorithms use publicly available reference C implementations. Hardware acce
 
 ## Hardware Platforms
 
-| Board                      | MCU       | Architecture    | Clock   | RAM    | Flash  |
-| -------------------------- | --------- | --------------- | ------- | ------ | ------ |
-| Raspberry Pi Pico          | RP2040    | ARM Cortex-M0+  | 125 MHz | 264 KB | 2 MB   |
-| STM32 Nucleo F446RE        | STM32F446 | ARM Cortex-M4F  | 180 MHz | 128 KB | 512 KB |
-| Nordic nRF52832 (PCA10040) | nRF52832  | ARM Cortex-M4F  | 64 MHz  | 64 KB  | 512 KB |
-| ESP32-C6 (DevKitC-1)       | ESP32-C6  | RISC-V RV32IMAC | 160 MHz | 512 KB | 4 MB   |
-| Raspberry Pi 5             | BCM2712   | ARM Cortex-A76  | 2.4 GHz | 8 GB   | -      |
+| Board                         | MCU       | Architecture    | Clock   | RAM    | Flash  |
+| ----------------------------- | --------- | --------------- | ------- | ------ | ------ |
+| Raspberry Pi Pico             | RP2040    | ARM Cortex-M0+  | 125 MHz | 264 KB | 2 MB   |
+| STM32 Nucleo F446RE           | STM32F446 | ARM Cortex-M4F  | 180 MHz | 128 KB | 512 KB |
+| Nordic nRF52840 DK (PCA10056) | nRF52840  | ARM Cortex-M4F  | 64 MHz  | 256 KB | 1 MB   |
+| ESP32-C61                     | ESP32-C61 | RISC-V RV32IMAC | 160 MHz | 512 KB | 4 MB   |
+| Raspberry Pi 5                | BCM2712   | ARM Cortex-A76  | 2.4 GHz | 8 GB   | -      |
 
 ---
 
@@ -51,8 +51,8 @@ ORBIT/
 ├── platforms/
 │   ├── pico/platform.h     # RP2040: SysTick + time_us_64 cycle counter
 │   ├── stm32/platform.h    # STM32F446: DWT CYCCNT cycle counter
-│   ├── nrf52/platform.h    # nRF52832: DWT CYCCNT cycle counter
-│   ├── esp32c6/platform.h  # ESP32-C6: RISC-V CSR cycle register
+│   ├── nrf52/platform.h    # nRF52840 DK: TIMER1-based cycle counter
+│   ├── esp32c61/           # ESP32-C61: ESP-IDF target support
 │   └── rpi5/platform.h     # RPi5: native Linux timer/counter backend
 ├── results/
 │   ├── archived/           # Preliminary single-run data (superseded)
@@ -74,7 +74,7 @@ ORBIT/
 ## Host Environment Setup
 
 > **These instructions target Windows 11 + WSL2 (Ubuntu 24.04 LTS).**
-> Native Linux users can skip the WSL2 and uspipd sections.
+> Native Linux users can skip the WSL2 and usbipd sections.
 > See the [Native Linux Notes](#native-linux-notes) section at the bottom.
 
 ### Requirements
@@ -183,19 +183,19 @@ Use `--clean` to force a clean rebuild when switching boards:
 python3 tools/orbit.py --board stm32 --algo ascon_aead128 --runs 1 --clean
 ```
 
-**Supported boards:** `pico`, `stm32`, `nrf52`, `esp32c6`, `rpi5`
+**Supported boards:** `pico`, `stm32`, `nrf52`, `esp32c61`, `rpi5`
 
 **Supported algorithms:** `ascon_aead128`, `ascon_aead80pq`, `gift_cofb`, `aes_128_gcm`, `ml_kem_512`
 
 ### Board-specific dependencies
 
-| Board    | Extra dependency | How to install                                                  |
-| -------- | ---------------- | --------------------------------------------------------------- |
-| Pico     | Pico SDK         | Handled by `setup.sh`                                           |
-| STM32    | STM32CubeF4      | Handled by `setup.sh`; override with `STM32CUBE_F4_PATH` if needed |
-| nRF52832 | nRF5 SDK + Nordic CLI tools | Install the nRF5 SDK, `nrfjprog`, and Segger J-Link tools; set `NRF5_SDK_PATH` |
-| ESP32-C6 | ESP-IDF v5.x     | Separate build system: in progress                              |
-| RPi5     | Native Linux toolchain | `sudo apt install build-essential cmake python3 python3-venv` |
+| Board       | Extra dependency            | How to install                                                                 |
+| ----------- | --------------------------- | ------------------------------------------------------------------------------ |
+| Pico        | Pico SDK                    | Handled by `setup.sh`                                                          |
+| STM32       | STM32CubeF4                 | Handled by `setup.sh`; override with `STM32CUBE_F4_PATH` if needed             |
+| nRF52840 DK | nRF5 SDK + Nordic CLI tools | Install the nRF5 SDK, `nrfjprog`, and Segger J-Link tools; set `NRF5_SDK_PATH` |
+| ESP32-C61   | ESP-IDF v5.x                | Install ESP-IDF and use the `esp32c61` target support in `tools/orbit.py`      |
+| RPi5        | Native Linux toolchain      | `sudo apt install build-essential cmake python3 python3-venv`                  |
 
 ---
 
@@ -249,18 +249,24 @@ The RPi5 target is a native Linux executable. ORBIT builds the binary locally, r
 
 ### Available flags
 
-| Flag                | Description                                                          |
-| ------------------- | -------------------------------------------------------------------- |
-| `--board`           | Target board (`pico`, `stm32`, `nrf52`, `esp32c6`, `rpi5`)           |
-| `--algo`            | Algorithm to benchmark                                               |
-| `--runs`            | Independent runs (default: 5)                                        |
-| `--flash`           | Auto-flash firmware after build                                      |
-| `--build-only`      | Build firmware and exit without flashing or serial capture           |
-| `--check`           | Verify local board prerequisites and exit                            |
-| `--clean`           | Clean build directory first                                          |
-| `--output`          | Custom output CSV path                                               |
-| `--port`            | Serial port override (recommended when multiple USB serial devices exist) |
-| `--postprocess CSV` | Fix epoch timestamps in an existing CSV                              |
+| Flag                    | Description                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| `--board`               | Target board (`pico`, `stm32`, `nrf52`, `esp32c61`, `rpi5`)                                  |
+| `--algo`                | Algorithm to benchmark                                                                       |
+| `--runs`                | Independent runs (default: 5)                                                                |
+| `--flash`               | Auto-flash firmware after build                                                              |
+| `--build-only`          | Build firmware and exit without flashing or serial capture                                   |
+| `--check`               | Verify local board prerequisites and exit                                                    |
+| `--clean`               | Clean build directory first                                                                  |
+| `--output`              | Custom output CSV path                                                                       |
+| `--port`                | Serial port override (recommended when multiple USB serial devices exist)                    |
+| `--energy-runs`         | Build firmware that repeats the benchmark internally with one frame trigger per internal run |
+| `--suite`               | Run the full supported algorithm suite for the selected board                                |
+| `--suite-algos`         | Comma-separated subset for `--suite` (default: all supported algorithms)                     |
+| `--pause-between-algos` | Pause between suite algorithms to support external measurement setup                         |
+| `--archive-existing`    | Archive an existing output CSV before writing a new one                                      |
+| `--no-stdio-wait`       | Build firmware that starts without waiting for a USB/serial connection                       |
+| `--postprocess CSV`     | Fix epoch timestamps in an existing CSV                                                      |
 
 ### Per-run workflow (Pico + WSL2)
 
@@ -309,7 +315,7 @@ python3 tools/orbit.py --board stm32 --algo ascon_aead128 --runs 5 --flash --por
 
 ### Per-run workflow (nRF52 + WSL2)
 
-The PCA10040 is flashed via `nrfjprog` and benchmark output is captured from the board's J-Link virtual COM port.
+The PCA10056 is flashed via `nrfjprog` and benchmark output is captured from the board's J-Link virtual COM port.
 
 Before running:
 
@@ -325,7 +331,7 @@ For a full automated run, use:
 python3 tools/orbit.py --board nrf52 --algo ascon_aead128 --runs 5 --flash --port /dev/ttyACM0
 ```
 
-If two ACM ports appear, the validated capture port for the PCA10040 workflow is typically `/dev/ttyACM0`.
+If two ACM ports appear, the validated capture port for the PCA10056 workflow is typically `/dev/ttyACM0`.
 
 ORBIT handles:
 
@@ -369,58 +375,51 @@ This will prompt you through the available boards and algorithms you can run.
 
 ## Energy Measurement
 
+Energy measurements are collected at the board level using an Analog Discovery 3 and GPIO trigger windows emitted by the benchmark firmware.
+
 ### Hardware required
 
-- INA226 power monitor breakout module
-- 0.1Ω 1% tolerance shunt resistor
 - Analog Discovery 3
-- Breadboard and jumper wires
-
-> Recommended to set up one dedicated breadboard per board.
-
-### Wiring overview
-
-The shunt resistor is placed in series on the 3.3V rail, load side of the onboard regulator. THis isolates the MCU current draw from USB supply noise and regulates quiescent current.
-
-```text
-USB 5V → [onboard regulator] → [0.1Ω shunt] → board 3.3V pin → MCU
-                                     ↑
-                                  INA226 IN+/IN-
-                                  INA226 SDA/SCL → MCU I2C pins
-                                  INA226 analog out → AD3 scope ch1
-                                  MCU GPIO trigger → AD3 DIO ch0
-```
-
-### Pin assignments
-
-| Board               | Trigger | SDA   | SCL   |
-| ------------------- | ------- | ----- | ----- |
-| Raspberry Pi Pico   | GP15    | GP4   | GP5   |
-| STM32 Nucleo F446RE | PA8     | PB9   | PB8   |
-| nRF52832 PCA10040   | P0.17   | P0.26 | P0.27 |
-| ESP32-C6 DevKitC-1  | GPIO15  | GPIO6 | GPIO7 |
-| Raspberry Pi 5      | GPIO23  | GPIO2 | GPIO3 |
-
-### INA226 configuration
-
-| Parameter             | Value        |
-| --------------------- | ------------ |
-| Shunt resistance      | 0.1Ω 1%      |
-| Conversion time       | 140 µs       |
-| Averaging             | 4 samples    |
-| Effective sample rate | 1 per 560 µs |
-| ADC resolution        | 16-bit       |
+- WaveForms host software
+- Dedicated measurement wiring for each target board
+- GPIO trigger connection from the target to the AD3 digital input
 
 ### Collection workflow
 
-1. Wire up the board on its dedicated breadboard
-2. Take an idle baseline current reading before each algorithm configuration
-3. Run the same firmware binary used for cycle benchmarking
-4. AEAD: one GPIO window per full iteration loop (divide total energy by iteration count)
-5. ML-KEM: one GPIO window per individual operation
-6. For ML-KEM on Pico (operations >130ms): use WaveForms Record mode
-7. Export AD3 trace from WaveForms
-8. Post-process trace against timing CSV using GPIO trigger timestamps for alignment
+1. Prepare the board under test on a dedicated measurement setup.
+2. Build and run the same firmware used for timing benchmarks.
+3. Use GPIO trigger windows to mark the active measurement interval.
+4. Capture the resulting waveform in WaveForms.
+5. Export the trace and post-process it alongside the benchmark CSV output.
+
+For AEAD algorithms, one trigger window covers the measured benchmark loop. For ML-KEM-512, KeyGen, Encapsulation, and Decapsulation are measured as separate operations.
+
+### Energy capture mode
+
+For externally captured energy measurements, ORBIT also supports:
+
+```bash
+python3 tools/orbit.py --board <board> --algo <algorithm> --runs 5 --flash --energy-runs <N>
+```
+
+This builds firmware that repeats the benchmark internally and emits one frame trigger per internal run. It is useful when aligning WaveForms captures against ORBIT CSV output, especially for multi-run energy collection workflows.
+
+Exact current-measurement wiring differs slightly by board and measurement rig. ORBIT documents the software workflow here, while board-specific electrical setup should follow the target board documentation and the local measurement fixture used in the experiment.
+
+### Energy trace post-processing
+
+After exporting a WaveForms CSV, merge the measured energy windows back into the ORBIT benchmark CSV:
+
+```bash
+python3 tools/process_energy.py \
+  --scope path/to/waveforms_capture.csv \
+  --orbit results/pico_ascon_aead128.csv \
+  --rate <sample_rate_hz> \
+  --runs 1,2,3,4,5 \
+  --multi-run-scope
+```
+
+For long captures produced with `--energy-runs`, one frame trigger is emitted per internal run so the exported scope file can be aligned against the matching ORBIT CSV rows.
 
 ---
 
@@ -441,7 +440,7 @@ One CSV row per (algorithm, platform, message size) per run, prefixed with a `ru
 | `enc_cycles_total`    | Total cycles across all iterations (encryption) |
 | `enc_cycles_per_byte` | Cycles per plaintext byte (primary metric)      |
 | `enc_time_us_per_op`  | Microseconds per encryption operation           |
-| `energy_uJ_enc_total` | Total energy: encryption window (INA226)        |
+| `energy_uJ_enc_total` | Total energy: Over the encryption window        |
 | `avg_power_mW_enc`    | Average power draw during encryption            |
 | `ok`                  | 1 = KAT passed, 0 = KAT failed                  |
 | `notes`               | Any output notes made during benchmark          |
@@ -452,19 +451,30 @@ One CSV row per (algorithm, platform, message size) per run, prefixed with a `ru
 
 Final 5-run datasets: `results/<board>_<algo>.csv`
 
-Preliminary single-run data (collected before 5-run protocol): `results/archived/`
+Per-board summaries: `results/summary/`
+
+Security-normalized derived metrics:
+
+- `results/summary/security_metrics_classical.csv`
+- `results/summary/security_metrics_quantum.csv`
+
+Full per-run trace datasets are generated locally in `results/traces/` but are not committed to GitHub because several files exceed GitHub's size limits.
+
+Full per-run trace archive (Zenodo): `https://doi.org/<DOI>`
+
+Preliminary single-run data (collected before the 5-run protocol): `results/archived/`
 
 ---
 
 ## Cycle Counting
 
-| Platform            | Method                         | Resolution |
-| ------------------- | ------------------------------ | ---------- |
-| RP2040 (Pico)       | SysTick + time_us_64()         | 1 cycle    |
-| STM32F446 (Nucleo)  | DWT CYCCNT                     | 1 cycle    |
-| nRF52832 (PCA10040) | TIMER1 capture scaled to 64 MHz-equivalent ticks | ~4 CPU cycles |
-| ESP32-C6            | RISC-V CSR `cycle`             | 1 cycle    |
-| BCM2712 (RPi5)      | ARM generic timer (`cntvct_el0`) with `clock_gettime` fallback | ~1 tick |
+| Platform           | Method                                                         | Resolution    |
+| ------------------ | -------------------------------------------------------------- | ------------- |
+| RP2040 (Pico)      | SysTick + time_us_64()                                         | 1 cycle       |
+| STM32F446 (Nucleo) | DWT CYCCNT                                                     | 1 cycle       |
+| nRF52840 DK        | TIMER1 capture scaled to 64 MHz-equivalent ticks               | ~4 CPU cycles |
+| ESP32-C61          | RISC-V CSR `cycle`                                             | 1 cycle       |
+| BCM2712 (RPi5)     | ARM generic timer (`cntvct_el0`) with `clock_gettime` fallback | ~1 tick       |
 
 > The RP2040 Cortex-M0+ does not implement DWT CYCCNT. ORBIT uses SysTick combined with the RP2040 hardware timer for equivalent single-cycle resolution within each microsecond tick.
 
@@ -488,7 +498,7 @@ Running on native Linux (Ubuntu, Debian, etc.) without WSL2:
 
 ```text
 Duval, E.C. (2026). Cross-Architecture Benchmarking of Lightweight and
-Post-Quantum Cryptography on Constrained IoT Microcontrollers.
+Post-Quantum Cryptography on Constrained IoT Platforms.
 M.Eng. Project & Report, Virginia Polyechnic Institute and State University
 ```
 
