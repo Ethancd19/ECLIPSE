@@ -8,8 +8,8 @@ cmake_minimum_required(VERSION 3.16)
 #   cmake -S . -B build -DBOARD=stm32     -DALGO_SELECTED=ascon_aead128
 #   cmake -S . -B build -DBOARD=nrf52     -DALGO_SELECTED=ascon_aead128
 #
-# Note: ESP32-C6 uses ESP-IDF and has its own build system.
-#       See platforms/esp32c6/README.md for ESP32-C6 build instructions.
+# Note: ESP32-C61 uses ESP-IDF and has its own build system.
+#       See platforms/esp32c61/ for ESP32-C61 build instructions.
 # =====================================================================
 
 # Board selection
@@ -64,6 +64,6 @@ else()
     message(FATAL_ERROR
         "Unknown BOARD: '${BOARD}'\n"
         "Available boards: pico, stm32, nrf52, rpi5\n"
-        "Note: ESP32-C6 uses ESP-IDF and has its own build system. See platforms/esp32c6/README.md for ESP32-C6 build instructions."
+        "Note: ESP32-C61 uses ESP-IDF and has its own build system. See platforms/esp32c61/ for ESP32-C61 build instructions."
         )
 endif()
